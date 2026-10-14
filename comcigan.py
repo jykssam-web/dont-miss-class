@@ -38,6 +38,10 @@ def search_school(keyword):
     out = []
     for row in got or []:
         try:
+            # 컴시간은 결과가 많으면 끝에 안내문 한 줄을 학교처럼 끼워 보낸다
+            # ([0, '알림', '없으면 추가 검색하세요', 0]). 학교 코드가 0이면 학교가 아니므로 뺀다.
+            if not row[3]:
+                continue
             out.append({"local_code": row[0], "region": row[1],
                         "name": row[2], "school_code": row[3]})
         except (IndexError, TypeError):

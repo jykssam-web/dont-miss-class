@@ -225,7 +225,8 @@ class Wizard(tk.Toplevel):
                 return
             for r in val:
                 self.lst.insert("end", "%s   %s" % (r["name"], r["region"]))
-            self.lbl_status.config(text="학교를 눌러 고르세요. (%d곳)" % len(val), fg=MUTED)
+            more = " 찾는 학교가 없으면 이름을 더 길게 적어 다시 검색해 보세요." if len(val) >= 10 else ""
+            self.lbl_status.config(text="학교를 눌러 고르세요. (%d곳)%s" % (len(val), more), fg=MUTED)
             if len(val) == 1:
                 self.lst.selection_set(0)
                 self._pick_school()

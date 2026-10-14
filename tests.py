@@ -47,6 +47,16 @@ eq(g, ["08:50", "09:45", "10:50", "12:00", "12:55", "14:10", "15:05"], "앞을 �
 g = schedule.cascade(g, 2, "10:40", 45)                   # 도로 당기면 원래대로
 eq(g, ["08:50", "09:45", "10:40", "11:50", "12:45", "14:00", "14:55"], "되돌리기")
 
+# --- 학교 검색: 컴시간이 끼워 보내는 안내 줄([0,'알림',…,0])은 학교가 아니므로 뺀다
+import pycomcigan
+_orig = pycomcigan.get_school_code
+pycomcigan.get_school_code = lambda kw: [[24966, "충북", "가나중학교", 11111],
+                                         [0, "알림", "없으면 추가 검색하세요", 0]]
+try:
+    eq([r["name"] for r in comcigan.search_school("가나")], ["가나중학교"], "안내 줄은 목록에서 빠진다")
+finally:
+    pycomcigan.get_school_code = _orig
+
 # --- 시각 입력 형식
 eq(schedule.norm_time("9:5"), "09:05"); eq(schedule.norm_time("1310"), "13:10")
 eq(schedule.norm_time("13시 10분"), "13:10"); eq(schedule.norm_time("25:00"), ""); eq(schedule.norm_time("abc"), "")
