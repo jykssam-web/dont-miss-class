@@ -111,14 +111,16 @@ class App:
             store.log("시간표 갱신 실패: %s" % e)
 
     # ------------------------------------------------------------ 화면 조작
-    def open_settings(self, first_run=False):
+    def open_settings(self, first_run=None):
         if self.wizard is not None and self.wizard.winfo_exists():
             self.wizard.lift()
             self.wizard.focus_force()
             return
         from wizard import Wizard
+        if first_run is None:                       # 아직 설정을 마친 적 없으면 「처음 설정」
+            first_run = not store.load()["configured"]
         self.wizard = Wizard(self.root, on_done=self._settings_done, on_test_alert=self._demo_with_sound,
-                             on_cancel=(self._quit_if_unconfigured), first_run=first_run)
+                             on_cancel=self._settings_closed, first_run=first_run)
 
     def _settings_done(self, cfg):
         self.cfg = cfg
@@ -128,10 +130,17 @@ class App:
         messagebox.showinfo("놓치지마수업", "설정을 마쳤어요.\n수업이 시작될 때 알려 드릴게요.\n"
                             "프로그램은 화면 오른쪽 아래 종 모양 아이콘으로 계속 켜져 있습니다.")
 
-    def _quit_if_unconfigured(self):
+    def _settings_closed(self):
+        """설정 창의 닫기(X)는 프로그램을 끄지 않는다. 트레이에 남아 있고, 끄려면 트레이 메뉴의 「종료」.
+        처음 설정을 마치지 않고 닫았으면 트레이에서 다시 열 수 있다고 한 번 알려 준다."""
         self.cfg = store.load()
-        if not self.cfg["configured"]:
-            self.quit()
+        self._update_tray()
+        if not self.cfg["configured"] and self.icon is not None:
+            try:
+                self.icon.notify("아직 설정이 끝나지 않았어요. 이 아이콘을 눌러 설정을 마치면 알림이 시작돼요.",
+                                 "놓치지마수업")
+            except Exception:
+                pass
 
     def test_alert(self):
         self._demo_with_sound(self.cfg["sound"])
