@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
-"""수업 알림 창. 교시가 시작하는 때 크게 뜨고, 누를 때까지 닫히지 않는다(창 아무 곳이나 누르면 닫힘)."""
+"""수업 알림 창. 교시가 시작하는 때 크게 뜨고, 누를 때까지 닫히지 않는다(창 아무 곳이나 누르면 닫힘).
+
+기본은 모서리가 둥글고 그림자가 있는 그림 창(native_window). 그 창을 못 만드는 PC에서는
+Tk 창(_show_tk)으로 물러선다."""
 import tkinter as tk
 import tkinter.font as tkfont
 
 import fonts
 import sounds
 import store
+
 BG = "#0f2a4a"
 FG = "#ffffff"
 SUB = "#b9cdea"
@@ -26,8 +30,40 @@ def _fit_size(font, text, max_px, start, weight="bold"):
 
 def show(root, period, time_text, lesson, sound_path="", font=None):
     """알림 창을 하나 띄운다. lesson = {"room","subject","replaced"}
-    font 를 안 주면 설정에 저장된 글씨체를 쓴다."""
-    FONT = fonts.family(store.load()["font"] if font is None else font)
+    font 를 안 주면 설정에 저장된 글씨체를 쓴다. 닫을 때 쓸 창 핸들을 돌려준다."""
+    family = fonts.family(store.load()["font"] if font is None else font)
+    try:
+        return _show_round(root, period, time_text, lesson, sound_path, family)
+    except Exception as e:                  # 그림 창이 안 되면 예전 모양이라도 띄운다
+        store.log("둥근 알림 창 실패, Tk 창으로 물러섬: %r" % e)
+        return _show_tk(root, period, time_text, lesson, sound_path, family)
+
+
+def _show_round(root, period, time_text, lesson, sound_path, family):
+    import alert_render
+    import native_window
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
+    img, _margin = alert_render.render(period, time_text, lesson, family, scale, sw)
+    off = int(28 * scale) * len(_open)
+    x = (sw - img.width) // 2 + off
+    y = max(0, (sh - img.height) // 2 - int(20 * scale)) + off
+    holder = {}
+
+    def closed():
+        if holder.get("h") in _open:
+            _open.remove(holder["h"])
+        if not _open:
+            sounds.stop()
+
+    holder["h"] = native_window.show(img, x, y, on_close=closed)
+    _open.append(holder["h"])
+    sounds.play(sound_path)
+    return holder["h"]
+
+
+def _show_tk(root, period, time_text, lesson, sound_path, family):
+    FONT = family
     win = tk.Toplevel(root)
     win.title("놓치지마수업")
     win.configure(bg=BG)
@@ -96,6 +132,10 @@ def show(root, period, time_text, lesson, sound_path="", font=None):
 
 
 def close(win):
+    if isinstance(win, int):                # 그림 창(핸들)
+        import native_window
+        native_window.close(win)            # 닫히면서 목록 정리·소리 멈춤은 closed() 가 한다
+        return
     if win in _open:
         _open.remove(win)
     if not _open:

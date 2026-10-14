@@ -13,7 +13,7 @@ FALLBACK = "맑은 고딕"
 _KNOWN = (("Eunhasu", "학교안심 은하수", "학교안심 은하수 R"),
           ("Wooju", "학교안심 우주", "학교안심 우주 R"),
           ("Jiugae", "학교안심 지우개", "학교안심 지우개 R"))
-_loaded = None        # [(보이는 이름, 윈도우에 등록된 글씨체 이름)]
+_loaded = None        # [(보이는 이름, 윈도우에 등록된 글씨체 이름, 파일 경로)]
 
 
 def _load():
@@ -34,7 +34,7 @@ def _load():
                 seen.add(fam)
                 name = os.path.basename(f)
                 label, gdi = next(((l, g) for key, l, g in _KNOWN if key in name), (fam, fam))
-                _loaded.append((label, gdi))
+                _loaded.append((label, gdi, f))
     except Exception as e:
         store.log("글씨체 불러오기 실패: %r" % e)
     return _loaded
@@ -42,7 +42,7 @@ def _load():
 
 def choices():
     """고를 수 있는 글씨체 [(보이는 이름, 글씨체)]. 맨 앞은 기본 글씨체."""
-    return [("기본(맑은 고딕)", FALLBACK)] + _load()
+    return [("기본(맑은 고딕)", FALLBACK)] + [(l, g) for l, g, _p in _load()]
 
 
 def family(choice=""):
@@ -50,7 +50,17 @@ def family(choice=""):
     avail = _load()
     if choice == FALLBACK:
         return FALLBACK
-    for _label, fam in avail:
+    for _label, fam, _path in avail:
         if fam == choice:
             return fam
     return avail[0][1] if avail and not choice else FALLBACK
+
+
+def file_for(fam):
+    """글씨체 이름 → (보통 글씨 파일, 굵은 글씨 파일 또는 None). 그림으로 직접 글을 그릴 때 쓴다."""
+    for _label, g, path in _load():
+        if g == fam:
+            return path, None            # 학교안심 서체는 굵은 글씨 파일이 없다(겹쳐 그려 굵게 한다)
+    win = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts")
+    reg, bold = os.path.join(win, "malgun.ttf"), os.path.join(win, "malgunbd.ttf")
+    return reg, (bold if os.path.isfile(bold) else None)
