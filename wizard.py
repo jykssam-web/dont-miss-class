@@ -507,7 +507,7 @@ class Wizard(tk.Toplevel):
         top.pack(fill="x", pady=(0, 4))
         ttk.Label(top, text="1교시 시작").pack(side="left")
         self.var_first = tk.StringVar(value=self.first)
-        cb = ttk.Combobox(top, textvariable=self.var_first, values=schedule.first_start_choices(),
+        cb = ui.Combo(top, textvariable=self.var_first, values=schedule.first_start_choices(),
                           width=7, state="readonly", font=(FONT, 12))
         cb.pack(side="left", padx=(8, 22))
         cb.bind("<<ComboboxSelected>>", lambda e: self._refill())
@@ -642,7 +642,7 @@ class Wizard(tk.Toplevel):
         self.var_sound = tk.StringVar(value=cur)
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(0, 6))
-        self.cb_sound = ttk.Combobox(row, textvariable=self.var_sound, values=labels, state="readonly",
+        self.cb_sound = ui.Combo(row, textvariable=self.var_sound, values=labels, state="readonly",
                                      width=24, font=(FONT, 12))
         self.cb_sound.pack(side="left")
         self.cb_sound.bind("<<ComboboxSelected>>", lambda e: self._sound_changed())
@@ -654,7 +654,7 @@ class Wizard(tk.Toplevel):
         self.var_font = tk.StringVar(value=cur)
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(0, 6))
-        cbf = ttk.Combobox(row, textvariable=self.var_font, values=[l for l, _ in self.font_opts],
+        cbf = ui.Combo(row, textvariable=self.var_font, values=[l for l, _ in self.font_opts],
                            state="readonly", width=24, font=(FONT, 12))
         cbf.pack(side="left")
         cbf.bind("<<ComboboxSelected>>", lambda e: self._font_changed())

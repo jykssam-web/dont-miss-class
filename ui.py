@@ -160,6 +160,8 @@ def setup_styles(win):
     st.configure("TFrame", background=BG)
     st.configure("TLabel", background=BG, foreground=TEXT)
     st.configure("TSeparator", background=LINE)
+    st.configure("TCombobox", arrowsize=24, background=SECOND)         # 화살표 칸을 넓고 옅은 회색으로
+    st.map("TCombobox", background=[("active", SECOND_HOVER), ("pressed", SECOND_DOWN)])
     for name in ("TEntry", "TCombobox"):
         st.configure(name, fieldbackground=BG, background=BG, foreground=TEXT, bordercolor="#d0d5dd",
                      lightcolor="#d0d5dd", darkcolor="#d0d5dd", padding=(10, 7), arrowcolor=MUTED)
@@ -257,3 +259,18 @@ class Chip(tk.Label):
         h = f.metrics("linespace") + 2 * self._pady
         super().configure(image=rounded_image(w, h, self._radius, fill, self._bg), text=self._text,
                           fg=fg, font=f)
+
+
+class Combo(ttk.Combobox):
+    """고르는 칸. 화살표만이 아니라 칸 어디를 눌러도 목록이 열린다(화살표 칸이 좁아 누르기 힘들다는 의견)."""
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, **kw)
+        self.configure(cursor="hand2")
+        self.bind("<Button-1>", self._open)
+
+    def _open(self, _e):
+        if str(self.cget("state")) == "readonly":
+            self.focus_set()
+            self.tk.call("ttk::combobox::Post", str(self))
+            return "break"
