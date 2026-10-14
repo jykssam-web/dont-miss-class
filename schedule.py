@@ -59,16 +59,20 @@ def fill(first, lesson=45, count=DEFAULT_COUNT, brk=BREAK_MIN):
 
 
 def cascade(times, index, new_time, lesson=45, brk=BREAK_MIN):
-    """index(0부터) 교시의 시작을 new_time 으로 고치고, 그 뒤 교시를 다시 센다.
-    앞 교시는 그대로 둔다. 시각을 못 읽으면 ValueError."""
+    """index(0부터) 교시의 시작을 new_time 으로 고치고, 그 뒤 교시를 **같은 만큼 밀어** 준다.
+    앞 교시는 그대로 둔다. 시각을 못 읽으면 ValueError.
+
+    뒤 교시를 처음부터 다시 세지 않고 밀기만 하므로, 앞서 점심·조회 때문에 늦춰 둔 뒤쪽 교시의
+    틈(예: 6교시 앞의 긴 쉬는 시간)이 앞 교시를 고쳐도 지워지지 않는다. 기본값(쉬는 시간 10분)
+    상태에서는 다시 세는 것과 결과가 같다. lesson·brk 는 예전 호출과 맞추려고 남겨 둔 인자다."""
     t = norm_time(new_time)
     if not t:
         raise ValueError("시각을 「9:05」처럼 적어 주세요.")
+    delta = to_min(t) - to_min(times[index])
     out = list(times)
     out[index] = t
-    step = int(lesson) + int(brk)
     for i in range(index + 1, len(out)):
-        out[i] = from_min(to_min(out[i - 1]) + step)
+        out[i] = from_min(to_min(out[i]) + delta)
     return out
 
 

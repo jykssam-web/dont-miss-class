@@ -517,8 +517,9 @@ class Wizard(tk.Toplevel):
             ui.Chip(top, text="%d분" % m, variable=self.var_lesson, value=m,
                     command=self._refill).pack(side="left", padx=(8, 0))
 
-        self.lbl_hint = self._label("점심 뒤 첫 교시의 시각만 고치세요. 숫자만 쳐도(예: 1315) 13:15로 바뀌고, "
-                                    "그 뒤 교시는 자동으로 따라 바뀌어요.", MUTED, pady=(12, 8))
+        self.lbl_hint = self._label("점심이나 다른 일정 때문에 늦게 시작하는 교시는 그 교시의 시각을 고치세요. 몇 곳이든 고칠 수 "
+                                    "있고, 고친 교시부터 뒤 교시가 같이 밀려요. 숫자만 쳐도(예: 1315) 13:15가 돼요.",
+                                    MUTED, pady=(12, 8))
         bar = ttk.Frame(self.body)
         bar.pack(fill="x")
         ui.Button(bar, text="교시 추가", command=self._add).pack(side="left")
