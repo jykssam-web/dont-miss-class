@@ -16,11 +16,10 @@ import schedule
 import sounds
 import store
 
-FONT = "맑은 고딕"
-ACCENT = "#1f54a8"
-MUTED = "#5b6573"
-ERR = "#c0392b"
-OK = "#1e7d4f"
+import ui
+
+FONT = ui.family()
+ACCENT, MUTED, ERR, OK, TEXT = ui.ACCENT, ui.MUTED, ui.ERR, ui.OK, ui.TEXT
 STEP_TITLES = ("학교 찾기", "내 수업 확인", "교시 시작 시각", "소리와 자동 실행")
 
 
@@ -32,7 +31,7 @@ class Wizard(tk.Toplevel):
         self.on_test_alert = on_test_alert
         self.on_cancel = on_cancel
         self.first_run = first_run
-        self.title("놓치지마수업 — " + ("처음 설정" if first_run else "설정"))
+        self.title("놓치지마수업")
         self.configure(bg="white")
         self.resizable(False, False)
         w, h = 660, 700
@@ -46,14 +45,7 @@ class Wizard(tk.Toplevel):
         except Exception:
             pass
 
-        style = ttk.Style(self)
-        style.configure(".", font=(FONT, 11))
-        style.configure("TButton", padding=(14, 6))
-        style.configure("Big.TButton", font=(FONT, 12, "bold"), padding=(20, 8))
-        style.configure("TRadiobutton", background="white")
-        style.configure("TCheckbutton", background="white")
-        style.configure("TFrame", background="white")
-        style.configure("TLabel", background="white")
+        ui.setup_styles(self)
 
         cfg = store.load()
         self.school = {"name": cfg["school_name"], "school_code": cfg["school_code"],
@@ -82,24 +74,36 @@ class Wizard(tk.Toplevel):
         self._q = queue.Queue()
         self.step = 0
 
-        # 머리 — 단계 표시
-        head = tk.Frame(self, bg=ACCENT)
-        head.pack(fill="x")
-        self.lbl_step = tk.Label(head, bg=ACCENT, fg="white", font=(FONT, 16, "bold"),
-                                 anchor="w", padx=24, pady=16)
-        self.lbl_step.pack(fill="x")
-        foot = ttk.Frame(self, padding=(26, 8, 26, 20))
-        foot.pack(side="bottom", fill="x")          # 먼저 붙여야 내용이 길어도 단추가 안 잘린다
-        self.body = ttk.Frame(self, padding=(26, 18, 26, 6))
+        # 머리: 작은 제목 · 큰 단계 이름 · 가는 진행 막대(흰 바탕)
+        head = tk.Frame(self, bg=ui.BG)
+        head.pack(fill="x", padx=30, pady=(24, 4))
+        top = tk.Frame(head, bg=ui.BG)
+        top.pack(fill="x")
+        tk.Label(top, text="놓치지마수업 · " + ("처음 설정" if first_run else "설정"), bg=ui.BG, fg=MUTED,
+                 font=(FONT, 10)).pack(side="left")
+        self.lbl_count = tk.Label(top, bg=ui.BG, fg=MUTED, font=(FONT, 10))
+        self.lbl_count.pack(side="right")
+        self.lbl_step = tk.Label(head, bg=ui.BG, fg=TEXT, font=(FONT, 21, "bold"), anchor="w")
+        self.lbl_step.pack(fill="x", pady=(8, 12))
+        self.bar = tk.Canvas(head, height=8, bg=ui.BG, highlightthickness=0)
+        self.bar.pack(fill="x")
+        self.bar.bind("<Configure>", lambda e: self._draw_bar())
+
+        # 바닥: 먼저 붙여야 내용이 길어도 단추가 안 잘린다
+        foot = tk.Frame(self, bg=ui.BG)
+        foot.pack(side="bottom", fill="x", padx=30, pady=(12, 22))
+        tk.Frame(self, bg=ui.LINE, height=1).pack(side="bottom", fill="x")
+        self.body = ttk.Frame(self, padding=(30, 16, 30, 6))
         self.body.pack(fill="both", expand=True)
-        self.btn_back = ttk.Button(foot, text="이전", command=self.back)
+        self.btn_back = ui.Button(foot, text="이전", command=self.back)
         self.btn_back.pack(side="left")
-        self.btn_next = ttk.Button(foot, text="다음", style="Big.TButton", command=self.next)
+        self.btn_next = ui.Button(foot, text="다음", command=self.next, kind="primary", padx=34)
         self.btn_next.pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.after(100, self._poll)
         self._show(0)
+        ui.tweak_title_bar(self)
 
     # ------------------------------------------------------------ 공통
     def _poll(self):
@@ -127,7 +131,7 @@ class Wizard(tk.Toplevel):
             c.destroy()
 
     def _label(self, text, color=None, size=11, bold=False, pady=(0, 6), wrap=580, **kw):
-        lb = tk.Label(self.body, text=text, bg="white", fg=color or "#1d2733", justify="left",
+        lb = tk.Label(self.body, text=text, bg="white", fg=color or TEXT, justify="left",
                       anchor="w", wraplength=wrap, font=(FONT, size, "bold" if bold else "normal"), **kw)
         lb.pack(fill="x", pady=pady)
         return lb
@@ -135,11 +139,26 @@ class Wizard(tk.Toplevel):
     def _show(self, n):
         self.step = n
         self._clear()
-        self.lbl_step.config(text="%d / 4  %s" % (n + 1, STEP_TITLES[n]))
+        self.lbl_step.config(text=STEP_TITLES[n])
+        self.lbl_count.config(text="%d / 4" % (n + 1))
+        self._draw_bar()
         self.btn_back.state(["!disabled"] if n > 0 else ["disabled"])
         self.btn_next.config(text="완료" if n == 3 else "다음")
         self.btn_next.state(["!disabled"])
         [self._page_school, self._page_name, self._page_times, self._page_alert][n]()
+
+    def _draw_bar(self):
+        """진행 막대: 지나온 단계와 지금 단계는 파랑, 남은 단계는 옅은 회색."""
+        w = self.bar.winfo_width()
+        if w < 20:
+            return
+        self.bar.delete("all")
+        gap, cap = 10, 4
+        seg = (w - 3 * gap) / 4.0
+        for i in range(4):
+            x0 = i * (seg + gap)
+            self.bar.create_line(x0 + cap, 4, x0 + seg - cap, 4, width=2 * cap, capstyle="round",
+                                 fill=ACCENT if i <= self.step else ui.LINE)
 
     def back(self):
         if self.step > 0:
@@ -169,10 +188,11 @@ class Wizard(tk.Toplevel):
         ent.pack(side="left", fill="x", expand=True, ipady=3)
         ent.bind("<Return>", lambda e: self._search())
         ent.focus_set()
-        ttk.Button(row, text="검색", command=self._search).pack(side="left", padx=(8, 0))
+        ui.Button(row, text="검색", command=self._search).pack(side="left", padx=(8, 0))
 
         self.lst = tk.Listbox(self.body, height=9, font=(FONT, 12), activestyle="none",
-                              exportselection=False, relief="solid", bd=1,
+                              exportselection=False, relief="flat", bd=0, bg=ui.SURFACE, fg=TEXT,
+                              highlightthickness=1, highlightbackground=ui.LINE, highlightcolor=ACCENT,
                               selectbackground=ACCENT, selectforeground="white")
         self.lst.pack(fill="both", expand=True)
         self.lst.bind("<<ListboxSelect>>", lambda e: self._pick_school())
@@ -236,8 +256,8 @@ class Wizard(tk.Toplevel):
         ent.bind("<Return>", lambda e: self._check_name())
         ent.bind("<KeyRelease>", lambda e: self._name_edited())
         ent.focus_set()
-        ttk.Button(row, text="내 수업 찾기", command=self._check_name).pack(side="left", padx=(8, 0))
-        ttk.Button(row, text="컴시간 없이 직접 입력", command=self._open_manual).pack(side="right")
+        ui.Button(row, text="내 수업 찾기", command=self._check_name).pack(side="left", padx=(8, 0))
+        ui.Button(row, text="컴시간 없이 직접 입력", command=self._open_manual).pack(side="right")
 
         self.lbl_status = self._label("", MUTED, pady=(0, 6))
         self.subj_frame = ttk.Frame(self.body)      # 이름이 같은 선생님이 있을 때만 채워진다
@@ -245,15 +265,16 @@ class Wizard(tk.Toplevel):
         # 반 고르기는 평소엔 접어 두고, 남의 수업이 섞였다는 신호가 있으면 저절로 펼친다.
         # 목록은 길어질 수 있어 맨 아래에 두고, 고르는 칸은 그 위에 둔다(화면이 모자라도 잘리지 않게).
         self.rooms_open = bool(self.exclude)
-        self.btn_rooms = ttk.Button(self.body, command=self._toggle_rooms)    # 반이 있을 때만 보인다
+        self.btn_rooms = ui.Button(self.body, command=self._toggle_rooms)    # 반이 있을 때만 보인다
         self.room_frame = ttk.Frame(self.body)
         self.room_frame.pack(fill="x", pady=(0, 6))
         box = ttk.Frame(self.body)
         box.pack(fill="both", expand=True)
         sb = ttk.Scrollbar(box)
         sb.pack(side="right", fill="y")
-        self.txt = tk.Text(box, height=8, font=(FONT, 11), relief="solid", bd=1, state="disabled",
-                           yscrollcommand=sb.set, bg="#f7f9fc", padx=10, pady=8)
+        self.txt = tk.Text(box, height=8, font=(FONT, 11), relief="flat", bd=0, state="disabled", fg=TEXT,
+                           highlightthickness=1, highlightbackground=ui.LINE, highlightcolor=ui.LINE,
+                           yscrollcommand=sb.set, bg=ui.SURFACE, padx=14, pady=10)
         self.txt.pack(side="left", fill="both", expand=True)
         sb.config(command=self.txt.yview)
         if self.name_checked == self.teacher and self.data and self.teacher:
@@ -349,14 +370,14 @@ class Wizard(tk.Toplevel):
             self.my_tid = comcigan.resolve_my_tid(
                 self.data, {"teacher": self.teacher, "my_sample": self.my_sample, "my_tid": self.my_tid})
             tk.Label(self.subj_frame, text="「%s」 이름의 선생님이 %d분 계세요. 선생님이 수업하시는 건 어느 것인가요?" % (
-                people[0]["name"], len(people)), bg="white", fg="#1d2733", font=(FONT, 11, "bold"),
+                people[0]["name"], len(people)), bg="white", fg=TEXT, font=(FONT, 11, "bold"),
                      wraplength=580, justify="left").pack(anchor="w")
             row = ttk.Frame(self.subj_frame)
             row.pack(fill="x", pady=(4, 6))
             self.var_person = tk.IntVar(value=-1 if self.my_tid is None else self.my_tid)
             for p in people:
-                ttk.Radiobutton(row, text="%s %s" % p["sample"], variable=self.var_person, value=p["tid"],
-                                command=self._person_picked).pack(side="left", padx=(0, 18))
+                ui.Chip(row, text="%s %s" % p["sample"], variable=self.var_person, value=p["tid"],
+                        command=self._person_picked, size=12, padx=18, pady=9).pack(side="left", padx=(0, 8))
         if self.my_tid is None:
             self.found_count = 0
             self.lbl_status.config(text="수업하시는 것을 골라 주세요. 고르면 그 선생님의 시간표만 남깁니다.", fg=ERR)
@@ -389,15 +410,15 @@ class Wizard(tk.Toplevel):
         if multi:
             self.subjects &= {k for k, _ in counts}
             self.subj_vars = {}
-            tk.Label(self.subj_frame, text="내가 가르치는 과목을 고르세요 (여러 과목이면 모두)", bg="white", fg="#1d2733",
+            tk.Label(self.subj_frame, text="내가 가르치는 과목을 고르세요 (여러 과목이면 모두)", bg="white", fg=TEXT,
                      font=(FONT, 11, "bold")).pack(anchor="w")
             row = ttk.Frame(self.subj_frame)
             row.pack(fill="x", pady=(2, 6))
             for k, n in counts:
                 v = tk.BooleanVar(value=k in self.subjects)
                 self.subj_vars[k] = v
-                ttk.Checkbutton(row, text="%s (주 %d시간)" % (k, n), variable=v,
-                                command=self._subject_toggled).pack(side="left", padx=(0, 14))
+                ui.Chip(row, text="%s (주 %d시간)" % (k, n), variable=v,
+                        command=self._subject_toggled).pack(side="left", padx=(0, 8))
         else:
             self.subjects = set()
 
@@ -465,8 +486,8 @@ class Wizard(tk.Toplevel):
         for i, r in enumerate(room_list):
             v = tk.BooleanVar(value=r not in out)
             self.room_vars[r] = v
-            ttk.Checkbutton(grid, text=r, variable=v, command=self._room_toggled, width=6).grid(
-                row=i // 7, column=i % 7, sticky="w", padx=(0, 4), pady=1)
+            ui.Chip(grid, text=r, variable=v, command=self._room_toggled, size=10, padx=14, pady=6).grid(
+                row=i // 7, column=i % 7, sticky="w", padx=(0, 6), pady=3)
 
     def _open_manual(self):
         ManualDialog(self, self.manual, self._manual_saved)
@@ -492,15 +513,15 @@ class Wizard(tk.Toplevel):
         ttk.Label(top, text="수업 길이").pack(side="left")
         self.var_lesson = tk.IntVar(value=self.lesson)
         for m in schedule.LESSON_CHOICES:
-            ttk.Radiobutton(top, text="%d분" % m, variable=self.var_lesson, value=m,
-                            command=self._refill).pack(side="left", padx=(8, 0))
+            ui.Chip(top, text="%d분" % m, variable=self.var_lesson, value=m,
+                    command=self._refill).pack(side="left", padx=(8, 0))
 
         self.rows = ttk.Frame(self.body)
         self.rows.pack(fill="x", pady=(4, 4))
         bar = ttk.Frame(self.body)
         bar.pack(fill="x")
-        ttk.Button(bar, text="교시 추가", command=self._add).pack(side="left")
-        ttk.Button(bar, text="마지막 교시 빼기", command=self._remove).pack(side="left", padx=8)
+        ui.Button(bar, text="교시 추가", command=self._add).pack(side="left")
+        ui.Button(bar, text="마지막 교시 빼기", command=self._remove).pack(side="left", padx=8)
         self._label("● 는 내 수업이 있는 교시 표시입니다.", MUTED, pady=(6, 0))
         self.lbl_lunch = self._label("", OK, pady=(4, 0))
         self.lbl_hint = self._label("점심시간 때문에 시작 시각이 다른 교시가 있으면 그 교시의 시각을 고치세요. "
@@ -597,7 +618,7 @@ class Wizard(tk.Toplevel):
 
     # --------------------------------------------------- 4 소리·자동 실행
     def _page_alert(self):
-        self._label("알림 소리를 고르세요.", bold=True, size=13)
+        self._label("알림 소리", bold=True, size=13, pady=(0, 6))
         self.sound_opts = [("소리 없음", "")] + sounds.builtin()
         labels = [l for l, _ in self.sound_opts] + ["내 파일 고르기…"]
         cur = sounds.label_for(self.sound)
@@ -607,32 +628,28 @@ class Wizard(tk.Toplevel):
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(0, 6))
         self.cb_sound = ttk.Combobox(row, textvariable=self.var_sound, values=labels, state="readonly",
-                                     width=26, font=(FONT, 12))
+                                     width=24, font=(FONT, 12))
         self.cb_sound.pack(side="left")
         self.cb_sound.bind("<<ComboboxSelected>>", lambda e: self._sound_changed())
-        ttk.Button(row, text="들어보기", command=lambda: sounds.play(self.sound)).pack(side="left", padx=8)
+        ui.Button(row, text="들어보기", command=lambda: sounds.play(self.sound)).pack(side="left", padx=10)
 
-        ttk.Separator(self.body).pack(fill="x", pady=12)
-        self._label("알림 글씨체를 고르세요.", bold=True, size=13)
+        self._label("알림 글씨체", bold=True, size=13, pady=(18, 6))
         self.font_opts = fonts.choices()
         cur = next((l for l, f in self.font_opts if f == fonts.family(self.font)), self.font_opts[0][0])
         self.var_font = tk.StringVar(value=cur)
-        cbf = ttk.Combobox(self.body, textvariable=self.var_font, values=[l for l, _ in self.font_opts],
-                           state="readonly", width=26, font=(FONT, 12))
-        cbf.pack(anchor="w", pady=(0, 2))
+        row = ttk.Frame(self.body)
+        row.pack(fill="x", pady=(0, 6))
+        cbf = ttk.Combobox(row, textvariable=self.var_font, values=[l for l, _ in self.font_opts],
+                           state="readonly", width=24, font=(FONT, 12))
+        cbf.pack(side="left")
         cbf.bind("<<ComboboxSelected>>", lambda e: self._font_changed())
+        ui.Button(row, text="알림 미리보기", command=self._test).pack(side="left", padx=10)
         self._font_changed()
 
-        ttk.Separator(self.body).pack(fill="x", pady=12)
-        self._label("윈도우를 켜면 자동으로 실행", bold=True, size=13)
-        ttk.Checkbutton(self.body, text="컴퓨터를 켤 때 자동으로 실행합니다 (권장)",
-                        variable=self.autostart).pack(anchor="w")
-        self._label("꺼 두면 프로그램을 직접 켜지 않은 날은 알림이 오지 않아요.", MUTED, pady=(4, 0))
-
-        ttk.Separator(self.body).pack(fill="x", pady=12)
-        self._label("알림이 어떻게 뜨는지 볼 수 있어요.", bold=True, size=13)
-        ttk.Button(self.body, text="테스트 알림 띄워 보기", command=self._test).pack(anchor="w")
-        self._label("알림 창은 화면 아무 곳이나 누를 때까지 닫히지 않아요.", MUTED, pady=(8, 0))
+        self._label("윈도우를 켜면 자동으로 실행", bold=True, size=13, pady=(18, 6))
+        ui.Chip(self.body, text="컴퓨터를 켤 때 자동으로 실행합니다 (권장)",
+                variable=self.autostart, padx=18, pady=9).pack(anchor="w")
+        self._label("꺼 두면 프로그램을 직접 켜지 않은 날은 알림이 오지 않아요.", MUTED, pady=(8, 0))
 
     def _sound_changed(self):
         label = self.var_sound.get()
@@ -725,8 +742,8 @@ class ManualDialog(tk.Toplevel):
                 ttk.Entry(self, textvariable=v, width=11, font=(FONT, 11)).grid(row=p + 1, column=d + 1, padx=3, pady=2)
         bar = tk.Frame(self, bg="white")
         bar.grid(row=schedule.MAX_PERIODS + 3, column=0, columnspan=6, pady=14)
-        ttk.Button(bar, text="저장", style="Big.TButton", command=self._save).pack(side="left", padx=6)
-        ttk.Button(bar, text="취소", command=self.destroy).pack(side="left", padx=6)
+        ui.Button(bar, text="저장", kind="primary", padx=30, command=self._save).pack(side="left", padx=6)
+        ui.Button(bar, text="취소", command=self.destroy).pack(side="left", padx=6)
 
     def _save(self):
         out = {}

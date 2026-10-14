@@ -13,7 +13,8 @@ FALLBACK = "맑은 고딕"
 _KNOWN = (("Eunhasu", "학교안심 은하수", "학교안심 은하수 R"),
           ("Wooju", "학교안심 우주", "학교안심 우주 R"),
           ("Jiugae", "학교안심 지우개", "학교안심 지우개 R"))
-_loaded = None        # [(보이는 이름, 윈도우에 등록된 글씨체 이름, 파일 경로)]
+_loaded = None        # [(보이는 이름, 윈도우에 등록된 글씨체 이름, 대표 파일 경로)]
+_files = {}           # 글씨체 이름 → 그 글씨체의 파일 전부(보통·굵게 따로 있는 서체용)
 
 
 def _load():
@@ -27,13 +28,15 @@ def _load():
         seen = set()
         for f in files:
             fam = ImageFont.truetype(f, 20).getname()[0]
-            if fam in seen:            # ttf 와 otf 가 같이 있으면 한 번만
-                continue
             # FR_PRIVATE(0x10): 이 프로그램에서만 보이고, 윈도우에 설치되지 않는다.
-            if ctypes.windll.gdi32.AddFontResourceExW(f, 0x10, 0):
-                seen.add(fam)
-                name = os.path.basename(f)
-                label, gdi = next(((l, g) for key, l, g in _KNOWN if key in name), (fam, fam))
+            # 파일은 전부 등록한다(보통·굵은 글씨 파일이 따로 있는 서체는 둘 다 있어야 굵게 나온다).
+            if not ctypes.windll.gdi32.AddFontResourceExW(f, 0x10, 0):
+                continue
+            name = os.path.basename(f)
+            label, gdi = next(((l, g) for key, l, g in _KNOWN if key in name), (fam, fam))
+            _files.setdefault(gdi, []).append(f)
+            if gdi not in seen:            # 고르는 목록에는 글씨체당 한 번만
+                seen.add(gdi)
                 _loaded.append((label, gdi, f))
     except Exception as e:
         store.log("글씨체 불러오기 실패: %r" % e)
@@ -60,7 +63,9 @@ def file_for(fam):
     """글씨체 이름 → (보통 글씨 파일, 굵은 글씨 파일 또는 None). 그림으로 직접 글을 그릴 때 쓴다."""
     for _label, g, path in _load():
         if g == fam:
-            return path, None            # 학교안심 서체는 굵은 글씨 파일이 없다(겹쳐 그려 굵게 한다)
+            bold = next((f for f in _files.get(g, []) if "bold" in os.path.basename(f).lower()), None)
+            regular = next((f for f in _files.get(g, []) if "bold" not in os.path.basename(f).lower()), path)
+            return regular, bold         # 굵은 글씨 파일이 없으면(학교안심) 알림 창에서 겹쳐 그려 굵게 한다
     win = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts")
     reg, bold = os.path.join(win, "malgun.ttf"), os.path.join(win, "malgunbd.ttf")
     return reg, (bold if os.path.isfile(bold) else None)
