@@ -502,9 +502,9 @@ class Wizard(tk.Toplevel):
 
     # --------------------------------------------------- 3 교시 시각
     def _page_times(self):
-        self._label("1교시 시작 시각과 수업 길이를 고르면 나머지 교시는 쉬는 시간 10분으로 채워집니다.", MUTED)
+        self._label("1교시 시작과 수업 길이를 고르면 나머지 교시가 자동으로 채워져요.", MUTED, pady=(0, 6))
         top = ttk.Frame(self.body)
-        top.pack(fill="x", pady=(0, 6))
+        top.pack(fill="x", pady=(0, 4))
         ttk.Label(top, text="1교시 시작").pack(side="left")
         self.var_first = tk.StringVar(value=self.first)
         cb = ttk.Combobox(top, textvariable=self.var_first, values=schedule.first_start_choices(),
@@ -517,34 +517,21 @@ class Wizard(tk.Toplevel):
             ui.Chip(top, text="%d분" % m, variable=self.var_lesson, value=m,
                     command=self._refill).pack(side="left", padx=(8, 0))
 
-        self.rows = ttk.Frame(self.body)
-        self.rows.pack(fill="x", pady=(4, 4))
+        self.lbl_hint = self._label("점심 뒤 첫 교시의 시각만 고치세요. 숫자만 쳐도(예: 1315) 13:15로 바뀌고, "
+                                    "그 뒤 교시는 자동으로 따라 바뀌어요.", MUTED, pady=(12, 8))
         bar = ttk.Frame(self.body)
         bar.pack(fill="x")
         ui.Button(bar, text="교시 추가", command=self._add).pack(side="left")
         ui.Button(bar, text="마지막 교시 빼기", command=self._remove).pack(side="left", padx=8)
-        # 반영됐다는 안내를 단추 바로 아래에 둔다(맨 아래에 두면 화면 끝에 가려진다)
-        self.lbl_err = self._label("", ERR, pady=(8, 0))
+        # 반영됐다는 안내는 칸 바로 위에 둔다(교시가 늘어 화면 아래가 가려져도 보이게)
+        self.lbl_err = self._label("", ERR, pady=(8, 6))
+        self.rows = tk.Frame(self.body, bg=ui.SURFACE)           # 옅은 회색 판 위에 두 칸씩
+        self.rows.pack(fill="x", pady=(0, 6))
         self.lbl_lunch = self._label("", MUTED, pady=(2, 0))
-        self.lbl_hint = self._label("점심 뒤 첫 교시의 시각만 고치세요. 입력하면 바로 뒤 교시가 바뀌어요. "
-                                    "(● 는 내 수업이 있는 교시)", MUTED, pady=(2, 0))
         if not self.times:
             self._refill()
         else:
             self._rebuild_rows()
-
-    def _mine_periods(self):
-        ps = set()
-        if self.data:
-            for cs in comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects,
-                                        self.my_tid).values():
-                ps.update(int(c["period"]) for c in cs)
-        for key in self.manual:
-            try:
-                ps.add(int(key.split("-")[1]))
-            except (ValueError, IndexError):
-                pass
-        return ps
 
     def _refill(self):
         self.first = self.var_first.get()
@@ -560,33 +547,32 @@ class Wizard(tk.Toplevel):
             c.destroy()
         self.row_vars = []
         self.row_entries = {}
-        mine = self._mine_periods()
-        # 교시가 많아도 화면이 길어지지 않게 5개씩 두 줄(왼쪽 1~5교시, 오른쪽 6~9교시)로 놓는다.
+        # 한 줄에 두 교시씩(1·2 / 3·4 / 5·6 / 7·8 …). 교시가 늘면 줄이 아래로 늘어난다.
         for i, t in enumerate(self.times):
-            col, r = (0, i) if i < 5 else (4, i - 5)
-            ttk.Label(self.rows, text="%d교시" % (i + 1), width=6, font=(FONT, 12)).grid(
-                row=r, column=col, pady=3, sticky="w")
+            r, base = i // 2, (0 if i % 2 == 0 else 3)
+            tk.Label(self.rows, text="%d교시" % (i + 1), bg=ui.SURFACE, fg=TEXT, font=(FONT, 12),
+                     width=5, anchor="w").grid(row=r, column=base, padx=(22, 6), pady=4, sticky="w")
             var = tk.StringVar(value=t)
             self.row_vars.append(var)
             if i == 0:
-                ttk.Label(self.rows, text=t, font=(FONT, 12, "bold"), width=8).grid(row=r, column=col + 1, sticky="w")
+                tk.Label(self.rows, text=t, bg=ui.SURFACE, fg=TEXT, font=(FONT, 12, "bold"),
+                         width=7, anchor="w").grid(row=r, column=base + 1, padx=(8, 0), sticky="w")
             else:
                 e = ttk.Entry(self.rows, textvariable=var, width=7, font=(FONT, 12))
-                e.grid(row=r, column=col + 1, sticky="w")
+                e.grid(row=r, column=base + 1, sticky="w")
                 e.bind("<Return>", lambda ev, k=i: self._commit(k, refocus=True))
                 e.bind("<FocusOut>", lambda ev, k=i: self._commit(k))
                 e.bind("<KeyRelease>", lambda ev, k=i: self._typing(k))
                 self.row_entries[i] = e
-            tk.Label(self.rows, text="●" if (i + 1) in mine else "", bg="white", fg=ACCENT,
-                     font=(FONT, 11), width=2).grid(row=r, column=col + 2, sticky="w")
-        self.rows.grid_columnconfigure(3, minsize=30)
+        self.rows.grid_columnconfigure(2, minsize=60)
+        self.rows.grid_rowconfigure(0, pad=0)
         self.lbl_lunch.config(text=schedule.lunch_note(self.times, self.lesson))
         self.after_idle(lambda: setattr(self, "_rebuilding", False))
         if focus is not None and focus in self.row_entries:      # 입력하던 칸에서 계속 칠 수 있게
             self.row_entries[focus].focus_set()
             self.row_entries[focus].icursor("end")
 
-    _FULL_TIME = re.compile(r"^\d{1,2}:\d{2}$|^\d{4}$")      # 「12:20」「9:05」「1220」처럼 끝까지 친 것만
+    _FULL_TIME = re.compile(r"^\d{1,2}:\d{2}$|^\d{4}$|^[89]\d{2}$")      # 「12:20」「9:05」「1220」처럼 끝까지 친 것만
 
     def _typing(self, index):
         """시각을 끝까지 치면 잠깐 뒤 저절로 반영한다(엔터를 몰라도 되게). 치는 도중의 「12:2」는 기다린다."""
