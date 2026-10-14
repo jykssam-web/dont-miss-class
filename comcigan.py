@@ -17,6 +17,7 @@ import store
 MIDDLE_REFRESH_MINUTES = 30
 HIGH_REFRESH_MINUTES = 40
 DAY_NAMES = ("월", "화", "수", "목", "금")
+ID_SEP = "\x00"          # 교사 이름 뒤에 번호를 잠시 붙여 두는 구분자
 
 
 class ComciganError(Exception):
@@ -50,6 +51,14 @@ def _fetch_by_code(school_code, local_code=0, school_name="", week_num=0):
     from pycomcigan import TimeTable
     codes = TimeTable._get_comcigan_codes()
     data = TimeTable._fetch_timetable_data(int(school_code), int(week_num), codes)
+    # 컴시간 자료의 교사 목록에는 교사마다 고유한 번호(자리)가 있다. 라이브러리는 번호를 이름으로
+    # 바꾸면서 번호를 버리는데, 이름은 두 글자로 잘려 와서 정미지·정미자가 둘 다 「정미」가 된다.
+    # 이름 뒤에 번호를 붙여 넘기면 칸마다 어느 교사인지 구별할 수 있다.
+    key = "자료" + codes[2]
+    names = data.get(key)
+    if isinstance(names, list):
+        data[key] = ["%s%s%d" % (TimeTable._format_teacher_name(n), ID_SEP, i)
+                     for i, n in enumerate(names)]
     tt = TimeTable.__new__(TimeTable)
     tt._initialize_from_data(data, int(local_code or 0), school_name or "",
                              int(school_code), codes)
@@ -80,6 +89,15 @@ def fetch(school_name=None, school_code=None, local_code=None, week_num=0):
         raise ComciganError("시간표 라이브러리가 들어 있지 않습니다.")
 
     tt = None
+    if not code and school_name:
+        # 코드가 없으면 이름으로 코드를 찾는다. 코드로 받아야 교사 번호를 얻을 수 있다.
+        try:
+            hits = search_school(school_name)
+            exact = [h for h in hits if h["name"] == school_name] or (hits if len(hits) == 1 else [])
+            if exact:
+                code, local = str(exact[0]["school_code"]), str(exact[0]["local_code"])
+        except Exception as e:
+            store.log("학교 코드 찾기 실패: %r" % e)
     if code:
         try:
             tt = _fetch_by_code(int(code), int(local or 0), school_name, week_num)
@@ -108,9 +126,11 @@ def fetch(school_name=None, school_code=None, local_code=None, week_num=0):
                     subject = (getattr(p, "subject", "") or "").strip()
                     if not subject:
                         continue
+                    name, _, tid = (getattr(p, "teacher", "") or "").partition(ID_SEP)
                     one.append({"period": getattr(p, "period", 0),
                                 "subject": subject,
-                                "teacher": (getattr(p, "teacher", "") or "").strip(),
+                                "teacher": name.strip(),
+                                "tid": int(tid) if tid.isdigit() else None,   # 같은 이름도 사람마다 다른 번호
                                 "replaced": bool(getattr(p, "replaced", False))})
                 if one:
                     cells[day] = one
@@ -130,15 +150,15 @@ def parse_rooms(text):
     return {m.replace(" ", "") for m in re.findall(r"\d+\s*-\s*\d+", text or "")}
 
 
-def my_periods(data, teacher, exclude=(), subjects=()):
+def my_periods(data, teacher, exclude=(), subjects=(), tid=None):
     """전 반을 훑어 내 수업만. {요일(1=월): [{period, subject, room, replaced}]}
 
     컴시간이 준 이름이 내 이름의 앞부분일 때만 나로 본다(한쪽 방향만).
         내 이름 정유경 · 컴시간 「정유」   → 나
         내 이름 정유경 · 컴시간 「정유리」 → 남
-    같은 두 글자를 쓰는 다른 선생님이 있으면 두 가지로 가른다.
-        subjects  내가 가르치는 과목만(정미지=수학, 정미자=과학이면 수학만 고르면 된다)
-        exclude   과목까지 같을 때, 남의 반을 직접 뺀다
+    같은 두 글자를 쓰는 다른 선생님이 있으면:
+        tid       컴시간 교사 번호. 사람이 정확히 갈린다(처음 설정에서 내 수업을 골라 정한다)
+        subjects / exclude   번호를 못 얻은 옛 자료일 때만 쓰는 예비 방법(과목·남의 반 빼기)
     """
     teacher = (teacher or "").strip()
     out = {d: [] for d in range(1, 6)}
@@ -153,6 +173,8 @@ def my_periods(data, teacher, exclude=(), subjects=()):
                 name = (c.get("teacher") or "").strip()
                 if len(name) < 2 or not teacher.startswith(name):
                     continue
+                if tid is not None and c.get("tid") is not None and c["tid"] != tid:
+                    continue
                 if subjects and (c.get("subject") or "") not in subjects:
                     continue
                 out[int(day)].append({"period": c.get("period", 0),
@@ -162,6 +184,71 @@ def my_periods(data, teacher, exclude=(), subjects=()):
     for day in out:
         out[day].sort(key=lambda x: x["period"])
     return out
+
+
+def has_ids(data):
+    """이 시간표에 교사 번호가 들어 있나(옛 저장본이나 이름으로 받은 경우는 없다)."""
+    for days in ((data or {}).get("classes") or {}).values():
+        for cells in days.values():
+            for c in cells:
+                return c.get("tid") is not None
+    return False
+
+
+def candidates(data, teacher):
+    """내 이름과 맞는 교사를 **사람 단위로** 갈라 돌려준다. 이름이 같아도 번호가 다르면 다른 사람.
+
+    [{"tid", "name", "hours", "pairs": {(과목, 반): 시간}, "sample": (과목, 반)}, …]
+    sample 은 사람마다 보여 줄 대표 수업 하나다. 다른 사람과 겹치지 않는 (과목, 반)을 먼저 고른다.
+    """
+    teacher = (teacher or "").strip()
+    by = {}
+    for room, days in ((data or {}).get("classes") or {}).items():
+        for cells in days.values():
+            for c in cells:
+                name, tid = (c.get("teacher") or "").strip(), c.get("tid")
+                if tid is None or len(name) < 2 or not teacher.startswith(name):
+                    continue
+                p = by.setdefault(tid, {"tid": tid, "name": name, "hours": 0, "pairs": {}})
+                p["hours"] += 1
+                k = (c.get("subject", ""), room)
+                p["pairs"][k] = p["pairs"].get(k, 0) + 1
+    people = list(by.values())
+    holders = {}
+    for p in people:
+        for k in p["pairs"]:
+            holders.setdefault(k, set()).add(p["tid"])
+    used = set()
+    for p in sorted(people, key=lambda p: p["tid"]):
+        order = sorted(p["pairs"], key=lambda k: (-p["pairs"][k], _room_key(k[1]), k[0]))
+        pick = (next((k for k in order if len(holders[k]) == 1 and k not in used), None)
+                or next((k for k in order if k not in used), order[0]))
+        used.add(pick)
+        p["sample"] = pick
+    people.sort(key=lambda p: (_room_key(p["sample"][1]), p["sample"][0]))
+    return people
+
+
+def resolve_my_tid(data, cfg):
+    """저장해 둔 「내 대표 수업」으로 지금 시간표에서 나를 다시 찾는다.
+    교사 번호는 학기마다 새로 매겨질 수 있어서 번호만 믿지 않는다. 못 가르면 None
+    (그러면 이름이 같은 분들의 수업을 모두 알린다 — 놓치는 것보다 더 알리는 쪽이 낫다)."""
+    if not has_ids(data):
+        return None
+    people = candidates(data, cfg.get("teacher"))
+    if not people:
+        return None
+    if len(people) == 1:
+        return people[0]["tid"]
+    s = cfg.get("my_sample") or {}
+    key = (s.get("subject"), s.get("room"))
+    hit = [p["tid"] for p in people if key in p["pairs"]]
+    if len(hit) == 1:
+        return hit[0]
+    old = cfg.get("my_tid")
+    if old in [p["tid"] for p in people] and (not hit or old in hit):
+        return old
+    return None
 
 
 def conflicts(mine):
@@ -278,7 +365,7 @@ def lessons_on(day=None):
     data = cfg.get("cache")
     if data and data.get("월요일") == _monday(0):
         for c in my_periods(data, cfg["teacher"], parse_rooms(cfg.get("exclude_rooms")),
-                             cfg.get("my_subjects") or ()).get(wd + 1, []):
+                             cfg.get("my_subjects") or (), resolve_my_tid(data, cfg)).get(wd + 1, []):
             p = int(c.get("period") or 0)
             if p:
                 out[p] = {"room": c["room"], "subject": c["subject"], "replaced": c["replaced"]}

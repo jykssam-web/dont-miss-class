@@ -63,6 +63,8 @@ class Wizard(tk.Toplevel):
         self.manual = dict(cfg.get("manual") or {})
         self.exclude = cfg.get("exclude_rooms") or ""
         self.subjects = set(cfg.get("my_subjects") or [])
+        self.my_tid = cfg.get("my_tid")                 # 컴시간 교사 번호 — 같은 이름 속에서 나를 가른다
+        self.my_sample = cfg.get("my_sample")
         self.font = cfg.get("font") or ""
         self.lesson = int(cfg["lesson_min"] or 45)
         self.times = list(cfg["times"] or [])
@@ -73,7 +75,7 @@ class Wizard(tk.Toplevel):
         self.found_count = 0
         if self.data and self.teacher:           # 설정을 다시 여는 경우: 지난번 확인을 이어 쓴다
             n = len(comcigan.preview_lines(comcigan.my_periods(
-                self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects)))
+                self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects, self.my_tid)))
             if n:
                 self.found_count, self.name_checked = n, self.teacher
         self._rebuilding = False
@@ -216,6 +218,7 @@ class Wizard(tk.Toplevel):
         if str(r["school_code"]) != str(self.school["school_code"]):
             self.data = None                   # 학교가 바뀌면 옛 시간표는 버린다
             self.name_checked = ""
+            self.my_tid, self.my_sample = None, None
         self.school = {"name": r["name"], "school_code": r["school_code"], "local_code": r["local_code"]}
         self.lesson = schedule.lesson_minutes_for(r["name"]) if not self.times else self.lesson
         self.lbl_status.config(text="선택: %s" % r["name"], fg=OK)
@@ -224,7 +227,7 @@ class Wizard(tk.Toplevel):
     # --------------------------------------------------- 2 내 수업 확인
     def _page_name(self):
         self._label("선생님 이름을 적어 주세요.", bold=True, size=13)
-        self._label("컴시간은 이름을 두 글자로 줄여 줘요(정유경 → 정유). 같은 이름이 있으면 남의 수업이 섞일 수 있어요.", MUTED)
+        self._label("컴시간은 이름을 두 글자로 줄여 줘요(정유경 → 정유). 같은 이름의 선생님이 계시면 어느 분인지 물어볼게요.", MUTED)
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(2, 8))
         self.var_name = tk.StringVar(value=self.teacher)
@@ -275,6 +278,8 @@ class Wizard(tk.Toplevel):
         if len(name) < 2:
             self.lbl_status.config(text="이름을 두 글자 이상 적어 주세요.", fg=ERR)
             return
+        if name != self.teacher:                 # 다른 이름이면 전에 고른 「내 수업」은 버린다
+            self.my_tid, self.my_sample = None, None
         self.teacher = name
         if self.data and self.data.get("school") == self.school["name"] and \
                 self.data.get("월요일") == comcigan._monday(0):
@@ -312,7 +317,64 @@ class Wizard(tk.Toplevel):
         self.subjects = {k for k, v in self.subj_vars.items() if v.get()}
         self.after_idle(self._render_preview)       # 누른 단추를 그 자리에서 지우지 않게
 
+    def _person_picked(self):
+        tid = self.var_person.get()
+        p = next((p for p in self._people if p["tid"] == tid), None)
+        if p is None:
+            return
+        self.my_tid = tid
+        self.my_sample = {"subject": p["sample"][0], "room": p["sample"][1]}
+        self.after_idle(self._render_preview)       # 누른 단추를 그 자리에서 지우지 않게
+
+    def _render_people(self):
+        """컴시간 교사 번호로 같은 이름의 사람들을 갈라, 사람마다 대표 수업 하나만 보여 주고 고르게 한다."""
+        people = self._people = comcigan.candidates(self.data, self.teacher)
+        for c in self.subj_frame.winfo_children():
+            c.destroy()
+        self.subj_frame.configure(height=1)
+        self._draw_rooms([])                         # 반 고르기는 번호가 없을 때의 예비 방법
+        if not people:
+            self.found_count, self.my_tid = 0, None
+            self.lbl_status.config(
+                text="「%s」로 된 수업을 찾지 못했습니다. 컴시간에 적힌 이름과 같은지 확인하거나 직접 입력해 주세요." % self.teacher,
+                fg=ERR)
+            self._set_text("")
+            self._update_next()
+            return
+        if len(people) == 1:
+            p = people[0]
+            self.my_tid = p["tid"]
+            self.my_sample = {"subject": p["sample"][0], "room": p["sample"][1]}
+        else:
+            self.my_tid = comcigan.resolve_my_tid(
+                self.data, {"teacher": self.teacher, "my_sample": self.my_sample, "my_tid": self.my_tid})
+            tk.Label(self.subj_frame, text="「%s」 이름의 선생님이 %d분 계세요. 선생님이 수업하시는 건 어느 것인가요?" % (
+                people[0]["name"], len(people)), bg="white", fg="#1d2733", font=(FONT, 11, "bold"),
+                     wraplength=580, justify="left").pack(anchor="w")
+            row = ttk.Frame(self.subj_frame)
+            row.pack(fill="x", pady=(4, 6))
+            self.var_person = tk.IntVar(value=-1 if self.my_tid is None else self.my_tid)
+            for p in people:
+                ttk.Radiobutton(row, text="%s %s" % p["sample"], variable=self.var_person, value=p["tid"],
+                                command=self._person_picked).pack(side="left", padx=(0, 18))
+        if self.my_tid is None:
+            self.found_count = 0
+            self.lbl_status.config(text="수업하시는 것을 골라 주세요. 고르면 그 선생님의 시간표만 남깁니다.", fg=ERR)
+            self._set_text("")
+            self._update_next()
+            return
+        lines = comcigan.preview_lines(comcigan.my_periods(self.data, self.teacher, tid=self.my_tid))
+        self.found_count = len(lines)
+        self.lbl_status.config(
+            text="컴시간에서 「%s」로 표시된 수업 주 %d시간을 찾았어요. 내 수업이 맞나요?" % (people[0]["name"], len(lines)),
+            fg=OK)
+        self._set_text("\n".join(lines))
+        self._update_next()
+
     def _render_preview(self):
+        if comcigan.has_ids(self.data):
+            self._render_people()
+            return
         rooms = comcigan.parse_rooms(self.exclude)
         base = comcigan.my_periods(self.data, self.teacher, rooms)       # 과목을 거르기 전
         counts = comcigan.subject_counts(base)
@@ -452,7 +514,8 @@ class Wizard(tk.Toplevel):
     def _mine_periods(self):
         ps = set()
         if self.data:
-            for cs in comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects).values():
+            for cs in comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects,
+                                        self.my_tid).values():
                 ps.update(int(c["period"]) for c in cs)
         for key in self.manual:
             try:
@@ -621,11 +684,16 @@ class Wizard(tk.Toplevel):
         if self.autostart.get() and not ok:
             messagebox.showwarning("자동 실행", "자동 실행 등록이 안 됐습니다. 보안 프로그램이 막았을 수 있어요.\n"
                                    "알림은 프로그램이 켜져 있을 때만 옵니다.", parent=self)
+        person_mode = comcigan.has_ids(self.data) and self.my_tid is not None
         cfg = store.update(
             configured=True, enabled=True,
             school_name=self.school["name"], school_code=str(self.school["school_code"]),
             local_code=str(self.school["local_code"]), teacher=self.teacher,
-            exclude_rooms=self.exclude, my_subjects=sorted(self.subjects), font=self.font,
+            # 교사 번호로 사람을 갈랐으면 과목·반 빼기는 필요 없다(번호가 없는 옛 자료일 때만 쓴다).
+            exclude_rooms="" if person_mode else self.exclude,
+            my_subjects=[] if person_mode else sorted(self.subjects),
+            my_tid=self.my_tid if person_mode else None,
+            my_sample=self.my_sample if person_mode else None, font=self.font,
             lesson_min=int(self.lesson), times=list(self.times), sound=self.sound,
             autostart=bool(self.autostart.get()), manual=self.manual,
             cache=self.data if self.data else None,

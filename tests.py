@@ -111,6 +111,47 @@ sci = comcigan.lessons_on(date.fromisoformat(twin["월요일"]))
 eq(sci, {2: {"room": "1-5", "subject": "과학", "replaced": False}}, "정미자 쪽(과학)을 고르면 1-5만")
 store.update(my_subjects=[], teacher="정유경", cache=data)
 
+# --- 사용자 예시: 정미란(수학 1-1~4) · 정미지(과학 1-1~5) · 정미경(수학 1-7~10). 컴시간 이름은 셋 다 「정미」
+def tcell(p, subj, tid, rep=False):
+    return {"period": p, "subject": subj, "teacher": "정미", "tid": tid, "replaced": rep}
+trio_classes = {}
+slot = 0
+for room in ("1-1", "1-2", "1-3", "1-4"):          # 정미란 tid 5
+    trio_classes[room] = {1: [tcell(1 + slot % 4, "수학", 5)]}
+    slot += 1
+for i, room in enumerate(("1-1", "1-2", "1-3", "1-4", "1-5")):   # 정미지 tid 6 (1-1은 수학 선생님과 반이 같다)
+    trio_classes.setdefault(room, {}).setdefault(2, []).append(tcell(1 + i, "과학", 6))
+for i, room in enumerate(("1-7", "1-8", "1-9", "1-10")):         # 정미경 tid 7
+    trio_classes[room] = {3: [tcell(1 + i, "수학", 7)]}
+trio = {"월요일": comcigan._monday(0), "classes": trio_classes}
+assert comcigan.has_ids(trio)
+who = comcigan.candidates(trio, "정미지")
+eq(sorted((p["tid"], p["sample"]) for p in who),
+   [(5, ("수학", "1-1")), (6, ("과학", "1-1")), (7, ("수학", "1-7"))], "사람마다 대표 수업 하나씩")
+eq(len({p["sample"] for p in who}), 3, "대표 수업은 서로 달라야 고를 수 있다")
+# 정미지(과학 1-1)를 고르면 정미지의 수업만 나온다
+cfg_me = {"teacher": "정미지", "my_sample": {"subject": "과학", "room": "1-1"}, "my_tid": 6}
+eq(comcigan.resolve_my_tid(trio, cfg_me), 6)
+mine3 = comcigan.my_periods(trio, "정미지", tid=6)
+eq(sorted({c["subject"] for cs in mine3.values() for c in cs}), ["과학"])
+eq(comcigan.sorted_rooms(mine3), ["1-1", "1-2", "1-3", "1-4", "1-5"])
+# 다음 학기에 교사 번호가 뒤바뀌어도, 고른 대표 수업(과학 1-1)으로 나를 다시 찾는다
+shifted = {"월요일": trio["월요일"], "classes": {
+    r: {d: [dict(c, tid={5: 7, 6: 5, 7: 6}[c["tid"]]) for c in cs] for d, cs in days.items()}
+    for r, days in trio_classes.items()}}
+eq(comcigan.resolve_my_tid(shifted, cfg_me), 5, "번호가 바뀌어도 (과학, 1-1)을 가르치는 사람이 나")
+# 대표 수업이 사라졌으면(반 배정이 바뀜) 예전 번호를 쓴다. 둘 다 안 되면 None
+gone = {"teacher": "정미지", "my_sample": {"subject": "과학", "room": "3-3"}, "my_tid": 6}
+eq(comcigan.resolve_my_tid(trio, gone), 6)
+eq(comcigan.resolve_my_tid(trio, {"teacher": "정미지", "my_sample": {"subject": "과학", "room": "3-3"}, "my_tid": 99}), None)
+# 한 사람뿐이면 묻지 않는다
+solo = {"월요일": trio["월요일"], "classes": {"1-1": {1: [tcell(1, "수학", 5)]}}}
+eq(len(comcigan.candidates(solo, "정미란")), 1)
+# 이름이 다른 사람(정미소)은 후보에 안 든다
+eq([p["tid"] for p in comcigan.candidates({"월요일": "x", "classes": {"1-1": {1: [dict(tcell(1, "수학", 8), teacher="정미소")]}}}, "정미지")], [])
+# 옛 저장본(번호 없음)은 번호 방식을 쓰지 않는다
+eq(comcigan.has_ids(data), False)
+
 # --- 오늘 수업: 이번 주 캐시가 있으면 그것, 없으면 직접 입력
 store.update(teacher="정유경", cache=data, manual={"0-1": "9-9 가짜"})
 mon = date.fromisoformat(data["월요일"])
