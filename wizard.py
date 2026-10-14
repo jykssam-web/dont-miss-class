@@ -5,6 +5,7 @@
 """
 import os
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -522,11 +523,11 @@ class Wizard(tk.Toplevel):
         bar.pack(fill="x")
         ui.Button(bar, text="교시 추가", command=self._add).pack(side="left")
         ui.Button(bar, text="마지막 교시 빼기", command=self._remove).pack(side="left", padx=8)
-        self._label("● 는 내 수업이 있는 교시 표시입니다.", MUTED, pady=(6, 0))
-        self.lbl_lunch = self._label("", OK, pady=(4, 0))
-        self.lbl_hint = self._label("점심시간 때문에 시작 시각이 다른 교시가 있으면 그 교시의 시각을 고치세요. "
-                                    "그 교시부터 뒤 교시가 자동으로 다시 계산됩니다.", MUTED, pady=(4, 0))
-        self.lbl_err = self._label("", ERR, pady=(4, 0))
+        # 반영됐다는 안내를 단추 바로 아래에 둔다(맨 아래에 두면 화면 끝에 가려진다)
+        self.lbl_err = self._label("", ERR, pady=(8, 0))
+        self.lbl_lunch = self._label("", MUTED, pady=(2, 0))
+        self.lbl_hint = self._label("점심 뒤 첫 교시의 시각만 고치세요. 입력하면 바로 뒤 교시가 바뀌어요. "
+                                    "(● 는 내 수업이 있는 교시)", MUTED, pady=(2, 0))
         if not self.times:
             self._refill()
         else:
@@ -552,12 +553,13 @@ class Wizard(tk.Toplevel):
         self.times = schedule.fill(self.first, self.lesson, count)
         self._rebuild_rows()
 
-    def _rebuild_rows(self):
+    def _rebuild_rows(self, focus=None):
         # 입력칸이 지워질 때 날아오는 FocusOut 이 다시 계산을 일으키지 않게 막는다.
         self._rebuilding = True
         for c in self.rows.winfo_children():
             c.destroy()
         self.row_vars = []
+        self.row_entries = {}
         mine = self._mine_periods()
         # 교시가 많아도 화면이 길어지지 않게 5개씩 두 줄(왼쪽 1~5교시, 오른쪽 6~9교시)로 놓는다.
         for i, t in enumerate(self.times):
@@ -571,15 +573,39 @@ class Wizard(tk.Toplevel):
             else:
                 e = ttk.Entry(self.rows, textvariable=var, width=7, font=(FONT, 12))
                 e.grid(row=r, column=col + 1, sticky="w")
-                e.bind("<Return>", lambda ev, k=i: self._commit(k))
+                e.bind("<Return>", lambda ev, k=i: self._commit(k, refocus=True))
                 e.bind("<FocusOut>", lambda ev, k=i: self._commit(k))
+                e.bind("<KeyRelease>", lambda ev, k=i: self._typing(k))
+                self.row_entries[i] = e
             tk.Label(self.rows, text="●" if (i + 1) in mine else "", bg="white", fg=ACCENT,
                      font=(FONT, 11), width=2).grid(row=r, column=col + 2, sticky="w")
         self.rows.grid_columnconfigure(3, minsize=30)
         self.lbl_lunch.config(text=schedule.lunch_note(self.times, self.lesson))
         self.after_idle(lambda: setattr(self, "_rebuilding", False))
+        if focus is not None and focus in self.row_entries:      # 입력하던 칸에서 계속 칠 수 있게
+            self.row_entries[focus].focus_set()
+            self.row_entries[focus].icursor("end")
 
-    def _commit(self, index):
+    _FULL_TIME = re.compile(r"^\d{1,2}:\d{2}$|^\d{4}$")      # 「12:20」「9:05」「1220」처럼 끝까지 친 것만
+
+    def _typing(self, index):
+        """시각을 끝까지 치면 잠깐 뒤 저절로 반영한다(엔터를 몰라도 되게). 치는 도중의 「12:2」는 기다린다."""
+        if getattr(self, "_typing_job", None):
+            self.after_cancel(self._typing_job)
+            self._typing_job = None
+        if index < len(self.row_vars) and self._FULL_TIME.match(self.row_vars[index].get().strip()):
+            self._typing_job = self.after(450, lambda: self._commit(index, refocus=True))
+
+    def _notice(self, text, color):
+        """아래 안내 줄. 반영됐다는 알림은 몇 초 뒤 사라진다."""
+        if getattr(self, "_notice_job", None):
+            self.after_cancel(self._notice_job)
+            self._notice_job = None
+        self.lbl_err.config(text=text, fg=color)
+        if text and color == OK:
+            self._notice_job = self.after(6000, lambda: self._alive("lbl_err") and self.lbl_err.config(text=""))
+
+    def _commit(self, index, refocus=False):
         """index 교시의 칸을 고쳤으면 그 뒤 교시를 다시 센다."""
         if self._rebuilding or not self._alive("rows") or index >= len(self.times) \
                 or index >= len(self.row_vars):
@@ -591,11 +617,14 @@ class Wizard(tk.Toplevel):
         try:
             self.times = schedule.cascade(self.times, index, text, self.lesson)
         except ValueError as e:
-            self.lbl_err.config(text="%d교시: %s" % (index + 1, e))
+            self._notice("%d교시: %s" % (index + 1, e), ERR)
             self.row_vars[index].set(self.times[index])
             return False
-        self.lbl_err.config(text="")
-        self._rebuild_rows()
+        later = ["%d" % (i + 1) for i in range(index + 1, len(self.times))]
+        self._notice("%d교시를 %s로 바꿨어요.%s" % (
+            index + 1, self.times[index],
+            (" %s교시도 자동으로 다시 계산했어요." % "·".join(later)) if later else ""), OK)
+        self._rebuild_rows(focus=index if refocus else None)
         return True
 
     def _commit_pending_entry(self):
@@ -607,7 +636,7 @@ class Wizard(tk.Toplevel):
 
     def _add(self):
         if len(self.times) >= schedule.MAX_PERIODS:
-            self.lbl_err.config(text="교시는 %d교시까지 둘 수 있어요." % schedule.MAX_PERIODS)
+            self._notice("교시는 %d교시까지 둘 수 있어요." % schedule.MAX_PERIODS, ERR)
             return
         self.times = schedule.add_period(self.times, self.lesson)
         self._rebuild_rows()
