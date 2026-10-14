@@ -136,9 +136,9 @@ class App:
     def test_alert(self):
         self._demo_with_sound(self.cfg["sound"])
 
-    def _demo_with_sound(self, sound):
+    def _demo_with_sound(self, sound, font=None):
         t = (self.cfg["times"] or ["08:50"])[0]
-        alert_window.show(self.root, 1, t, {"room": "1-4", "subject": "수학", "replaced": True}, sound)
+        alert_window.show(self.root, 1, t, {"room": "1-4", "subject": "수학", "replaced": True}, sound, font)
 
     def refresh_now(self):
         threading.Thread(target=self._refresh_once, kwargs={"force": True}, daemon=True).start()

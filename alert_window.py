@@ -5,8 +5,7 @@ import tkinter.font as tkfont
 
 import fonts
 import sounds
-
-FONT = fonts.family()
+import store
 BG = "#0f2a4a"
 FG = "#ffffff"
 SUB = "#b9cdea"
@@ -15,18 +14,20 @@ ACCENT = "#ffb020"
 _open = []          # 떠 있는 알림. 겹쳐 뜨면 조금씩 비껴 놓는다
 
 
-def _fit_size(text, max_px, start, weight="bold"):
+def _fit_size(font, text, max_px, start, weight="bold"):
     """글이 max_px 안에 들어오는 가장 큰 글자 크기(pt). 긴 반 이름이 와도 넘치지 않게."""
     size = start
     while size > 24:
-        if tkfont.Font(family=FONT, size=size, weight=weight).measure(text) <= max_px:
+        if tkfont.Font(family=font, size=size, weight=weight).measure(text) <= max_px:
             break
         size -= 4
     return size
 
 
-def show(root, period, time_text, lesson, sound_path=""):
-    """알림 창을 하나 띄운다. lesson = {"room","subject","replaced"}"""
+def show(root, period, time_text, lesson, sound_path="", font=None):
+    """알림 창을 하나 띄운다. lesson = {"room","subject","replaced"}
+    font 를 안 주면 설정에 저장된 글씨체를 쓴다."""
+    FONT = fonts.family(store.load()["font"] if font is None else font)
     win = tk.Toplevel(root)
     win.title("놓치지마수업")
     win.configure(bg=BG)
@@ -46,7 +47,7 @@ def show(root, period, time_text, lesson, sound_path=""):
     room = (lesson.get("room") or "").strip()
     subject = (lesson.get("subject") or "").strip()
     big = ("%s 수업입니다" % room) if room else ("%s 수업입니다" % (subject or "수업"))
-    big_size = _fit_size(big, w - 80, 64)
+    big_size = _fit_size(FONT, big, w - 80, 64)
 
     # 안내 문구를 먼저 아래에 붙여 두면, 화면이 작아도 항상 보인다.
     tk.Label(win, text="화면 아무 곳이나 누르면 닫힙니다", bg=BG, fg=SUB,

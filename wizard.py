@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import autostart
 import comcigan
+import fonts
 import schedule
 import sounds
 import store
@@ -61,6 +62,8 @@ class Wizard(tk.Toplevel):
         self.data = cfg.get("cache")            # 마지막으로 받은 시간표
         self.manual = dict(cfg.get("manual") or {})
         self.exclude = cfg.get("exclude_rooms") or ""
+        self.subjects = set(cfg.get("my_subjects") or [])
+        self.font = cfg.get("font") or ""
         self.lesson = int(cfg["lesson_min"] or 45)
         self.times = list(cfg["times"] or [])
         self.first = self.times[0] if self.times else "08:50"
@@ -70,7 +73,7 @@ class Wizard(tk.Toplevel):
         self.found_count = 0
         if self.data and self.teacher:           # 설정을 다시 여는 경우: 지난번 확인을 이어 쓴다
             n = len(comcigan.preview_lines(comcigan.my_periods(
-                self.data, self.teacher, comcigan.parse_rooms(self.exclude))))
+                self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects)))
             if n:
                 self.found_count, self.name_checked = n, self.teacher
         self._rebuilding = False
@@ -221,8 +224,7 @@ class Wizard(tk.Toplevel):
     # --------------------------------------------------- 2 내 수업 확인
     def _page_name(self):
         self._label("선생님 이름을 적어 주세요.", bold=True, size=13)
-        self._label("컴시간은 이름을 두 글자로 줄여 보여 줘요(정유경 → 정유). 앞 두 글자가 같은 "
-                    "선생님이 계시면 남의 수업이 섞일 수 있으니, 아래 목록이 내 수업이 맞는지 확인하세요.", MUTED)
+        self._label("컴시간은 이름을 두 글자로 줄여 줘요(정유경 → 정유). 같은 이름이 있으면 남의 수업이 섞일 수 있어요.", MUTED)
         row = ttk.Frame(self.body)
         row.pack(fill="x", pady=(2, 8))
         self.var_name = tk.StringVar(value=self.teacher)
@@ -235,15 +237,14 @@ class Wizard(tk.Toplevel):
         ttk.Button(row, text="컴시간 없이 직접 입력", command=self._open_manual).pack(side="right")
 
         self.lbl_status = self._label("", MUTED, pady=(0, 6))
-        # 목록은 길어질 수 있어 맨 아래에 두고, 입력칸은 그 위에 둔다(화면이 모자라도 잘리지 않게).
-        ex = ttk.Frame(self.body)
-        ex.pack(fill="x", pady=(0, 8))
-        ttk.Label(ex, text="내 수업이 아닌 반 (있으면)").pack(side="left")
-        self.var_excl = tk.StringVar(value=self.exclude)
-        ee = ttk.Entry(ex, textvariable=self.var_excl, width=22, font=(FONT, 11))
-        ee.pack(side="left", padx=8)
-        ee.bind("<KeyRelease>", lambda e: self._exclude_edited())
-        tk.Label(ex, text="예: 2-3, 3-1", bg="white", fg=MUTED, font=(FONT, 10)).pack(side="left")
+        self.subj_frame = ttk.Frame(self.body)      # 이름이 같은 선생님이 있을 때만 채워진다
+        self.subj_frame.pack(fill="x")
+        # 반 고르기는 평소엔 접어 두고, 남의 수업이 섞였다는 신호가 있으면 저절로 펼친다.
+        # 목록은 길어질 수 있어 맨 아래에 두고, 고르는 칸은 그 위에 둔다(화면이 모자라도 잘리지 않게).
+        self.rooms_open = bool(self.exclude)
+        self.btn_rooms = ttk.Button(self.body, command=self._toggle_rooms)    # 반이 있을 때만 보인다
+        self.room_frame = ttk.Frame(self.body)
+        self.room_frame.pack(fill="x", pady=(0, 6))
         box = ttk.Frame(self.body)
         box.pack(fill="both", expand=True)
         sb = ttk.Scrollbar(box)
@@ -297,33 +298,113 @@ class Wizard(tk.Toplevel):
         self._render_preview()
         self._update_next()
 
-    def _exclude_edited(self):
-        self.exclude = self.var_excl.get().strip()
-        if self.name_checked == self.teacher and self.data:
+    def _toggle_rooms(self):
+        self.rooms_open = not self.rooms_open
+        if self.data and self.name_checked == self.teacher:
             self._render_preview()
-            self._update_next()
+
+    def _room_toggled(self):
+        """꺼 둔 반 = 내 수업이 아닌 반. 켜 둔 반만 남긴다."""
+        self.exclude = ", ".join(r for r, v in self.room_vars.items() if not v.get())
+        self.after_idle(self._render_preview)
+
+    def _subject_toggled(self):
+        self.subjects = {k for k, v in self.subj_vars.items() if v.get()}
+        self.after_idle(self._render_preview)       # 누른 단추를 그 자리에서 지우지 않게
 
     def _render_preview(self):
-        mine = comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude))
-        lines = comcigan.preview_lines(mine)
-        self.found_count = len(lines)
+        rooms = comcigan.parse_rooms(self.exclude)
+        base = comcigan.my_periods(self.data, self.teacher, rooms)       # 과목을 거르기 전
+        counts = comcigan.subject_counts(base)
         names = comcigan.matched_names(self.data, self.teacher)
+
+        # 이름 한 개에 과목이 여럿 나오면 → 이름이 같은 다른 선생님이 있거나 내가 여러 과목을 가르친다.
+        # 어느 쪽이든 내 과목을 직접 고르게 한다(정미지=수학 · 정미자=과학처럼 과목이 갈린다).
+        for c in self.subj_frame.winfo_children():
+            c.destroy()
+        self.subj_frame.configure(height=1)
+        multi = len(counts) > 1
+        if multi:
+            self.subjects &= {k for k, _ in counts}
+            self.subj_vars = {}
+            tk.Label(self.subj_frame, text="내가 가르치는 과목을 고르세요 (여러 과목이면 모두)", bg="white", fg="#1d2733",
+                     font=(FONT, 11, "bold")).pack(anchor="w")
+            row = ttk.Frame(self.subj_frame)
+            row.pack(fill="x", pady=(2, 6))
+            for k, n in counts:
+                v = tk.BooleanVar(value=k in self.subjects)
+                self.subj_vars[k] = v
+                ttk.Checkbutton(row, text="%s (주 %d시간)" % (k, n), variable=v,
+                                command=self._subject_toggled).pack(side="left", padx=(0, 14))
+        else:
+            self.subjects = set()
+
+        mine = comcigan.my_periods(self.data, self.teacher, rooms, self.subjects)
+        lines = comcigan.preview_lines(mine)
+        all_lines = comcigan.preview_lines(base)
+        conflicts = comcigan.conflicts(mine)
+        picking = not (multi and not self.subjects)
+        # 한 사람이 같은 시간에 두 반에 못 들어간다. 그런 칸이 보이거나 시간이 너무 많으면
+        # 이름이 겹친 다른 선생님이 섞인 것이니 반 고르기를 저절로 펼친다.
+        if picking and (conflicts or len(lines) > 30):
+            self.rooms_open = True
+        pool = comcigan.my_periods(self.data, self.teacher, (), self.subjects)
+        self._draw_rooms(comcigan.sorted_rooms(pool) if picking else [])
+        if multi and not self.subjects:
+            self.found_count = 0
+            self.lbl_status.config(
+                text="「%s」 이름으로 %d개 과목이 나와요. 내 과목에 체크하면 내 수업만 남깁니다." % (
+                    ", ".join(names), len(counts)), fg=ERR)
+            self._set_text("\n".join(all_lines))
+            self._update_next()
+            return
+        self.found_count = len(lines)
         if not lines:
             self.lbl_status.config(
                 text="「%s」로 된 수업을 찾지 못했습니다. 컴시간에 적힌 이름과 같은지 확인하거나 직접 입력해 주세요." % self.teacher,
                 fg=ERR)
             self._set_text("")
+        elif conflicts:
+            d, p, rs = conflicts[0]
+            self.lbl_status.config(
+                text="같은 시간에 두 반에 들어가는 칸이 있어요(%s %d교시 %s). 같은 이름의 다른 선생님 수업이 섞인 거예요. "
+                     "내 반만 켜 두세요. (합반 수업이면 그대로)" % (comcigan.DAY_NAMES[d - 1], p, "·".join(rs)), fg=ERR)
+            self._set_text("\n".join(lines))
         elif len(lines) > 30:
             # 한 선생님의 주당 수업은 보통 이보다 훨씬 적다. 이름이 겹친 다른 선생님 수업이 섞였다는 신호.
             self.lbl_status.config(
-                text="주 %d시간은 한 분의 수업으로는 너무 많아요. 같은 이름(「%s」)을 쓰는 다른 선생님 수업이 섞인 것 같습니다. "
-                     "내 수업이 아닌 반을 아래에 적어 빼 주세요." % (len(lines), ", ".join(names)), fg=ERR)
+                text="주 %d시간은 한 분 수업으로는 너무 많아요. 같은 이름(「%s」)의 다른 선생님 수업이 섞인 것 같아요. "
+                     "내 반만 켜 두세요." % (len(lines), ", ".join(names)), fg=ERR)
             self._set_text("\n".join(lines))
         else:
             self.lbl_status.config(
-                text="컴시간에서 「%s」로 표시된 수업 주 %d시간을 찾았어요. 내 수업이 맞나요?" % (", ".join(names), len(lines)),
-                fg=OK)
+                text="컴시간에서 「%s」로 표시된 수업 주 %d시간을 찾았어요. 내 수업이 맞나요?" % (
+                    ", ".join(names), len(lines)), fg=OK)
             self._set_text("\n".join(lines))
+        self._update_next()
+
+    def _draw_rooms(self, room_list):
+        """내 반 고르기. 켜 있으면 내 수업, 끄면 남의 수업으로 뺀다."""
+        for c in self.room_frame.winfo_children():
+            c.destroy()
+        self.room_frame.configure(height=1)
+        if not room_list:
+            self.btn_rooms.pack_forget()
+            return
+        self.btn_rooms.pack(anchor="w", pady=(0, 4), before=self.room_frame)
+        self.btn_rooms.config(text=("내 반 고르기 ▴" if self.rooms_open else
+                                                    "남의 수업이 섞였나요? 내 반 고르기 ▾"))
+        if not self.rooms_open:
+            return
+        out = comcigan.parse_rooms(self.exclude)
+        self.room_vars = {}
+        grid = ttk.Frame(self.room_frame)
+        grid.pack(fill="x")
+        for i, r in enumerate(room_list):
+            v = tk.BooleanVar(value=r not in out)
+            self.room_vars[r] = v
+            ttk.Checkbutton(grid, text=r, variable=v, command=self._room_toggled, width=6).grid(
+                row=i // 7, column=i % 7, sticky="w", padx=(0, 4), pady=1)
 
     def _open_manual(self):
         ManualDialog(self, self.manual, self._manual_saved)
@@ -371,7 +452,7 @@ class Wizard(tk.Toplevel):
     def _mine_periods(self):
         ps = set()
         if self.data:
-            for cs in comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude)).values():
+            for cs in comcigan.my_periods(self.data, self.teacher, comcigan.parse_rooms(self.exclude), self.subjects).values():
                 ps.update(int(c["period"]) for c in cs)
         for key in self.manual:
             try:
@@ -468,18 +549,27 @@ class Wizard(tk.Toplevel):
         self.cb_sound.bind("<<ComboboxSelected>>", lambda e: self._sound_changed())
         ttk.Button(row, text="들어보기", command=lambda: sounds.play(self.sound)).pack(side="left", padx=8)
 
-        ttk.Separator(self.body).pack(fill="x", pady=14)
+        ttk.Separator(self.body).pack(fill="x", pady=12)
+        self._label("알림 글씨체를 고르세요.", bold=True, size=13)
+        self.font_opts = fonts.choices()
+        cur = next((l for l, f in self.font_opts if f == fonts.family(self.font)), self.font_opts[0][0])
+        self.var_font = tk.StringVar(value=cur)
+        cbf = ttk.Combobox(self.body, textvariable=self.var_font, values=[l for l, _ in self.font_opts],
+                           state="readonly", width=26, font=(FONT, 12))
+        cbf.pack(anchor="w", pady=(0, 2))
+        cbf.bind("<<ComboboxSelected>>", lambda e: self._font_changed())
+        self._font_changed()
+
+        ttk.Separator(self.body).pack(fill="x", pady=12)
         self._label("윈도우를 켜면 자동으로 실행", bold=True, size=13)
         ttk.Checkbutton(self.body, text="컴퓨터를 켤 때 자동으로 실행합니다 (권장)",
                         variable=self.autostart).pack(anchor="w")
-        self._label("자동 실행이 꺼져 있으면 프로그램을 직접 켜지 않은 날은 알림이 오지 않아요. "
-                    "화면 오른쪽 아래 알림 영역의 종 모양 아이콘으로 계속 실행됩니다.", MUTED, pady=(4, 0))
+        self._label("꺼 두면 프로그램을 직접 켜지 않은 날은 알림이 오지 않아요.", MUTED, pady=(4, 0))
 
-        ttk.Separator(self.body).pack(fill="x", pady=14)
-        self._label("알림이 어떻게 뜨는지 먼저 볼 수 있어요.", bold=True, size=13)
+        ttk.Separator(self.body).pack(fill="x", pady=12)
+        self._label("알림이 어떻게 뜨는지 볼 수 있어요.", bold=True, size=13)
         ttk.Button(self.body, text="테스트 알림 띄워 보기", command=self._test).pack(anchor="w")
-        self._label("알림 창은 화면 아무 곳이나 누를 때까지 닫히지 않고, 교체·보강으로 바뀐 수업에는 「바뀐 수업」 표시가 붙습니다.",
-                    MUTED, pady=(8, 0))
+        self._label("알림 창은 화면 아무 곳이나 누를 때까지 닫히지 않아요.", MUTED, pady=(8, 0))
 
     def _sound_changed(self):
         label = self.var_sound.get()
@@ -501,8 +591,12 @@ class Wizard(tk.Toplevel):
                 pass            # 이미 고른 내 파일 그대로
         sounds.play(self.sound)
 
+    def _font_changed(self):
+        label = self.var_font.get()
+        self.font = next((f for l, f in self.font_opts if l == label), "")
+
     def _test(self):
-        self.on_test_alert(self.sound)
+        self.on_test_alert(self.sound, self.font)
 
     # --------------------------------------------------- 마무리
     def _update_next(self):
@@ -531,7 +625,7 @@ class Wizard(tk.Toplevel):
             configured=True, enabled=True,
             school_name=self.school["name"], school_code=str(self.school["school_code"]),
             local_code=str(self.school["local_code"]), teacher=self.teacher,
-            exclude_rooms=self.exclude,
+            exclude_rooms=self.exclude, my_subjects=sorted(self.subjects), font=self.font,
             lesson_min=int(self.lesson), times=list(self.times), sound=self.sound,
             autostart=bool(self.autostart.get()), manual=self.manual,
             cache=self.data if self.data else None,

@@ -83,6 +83,34 @@ eq(comcigan.parse_rooms("2-3, 3 - 1\n1-5"), {"2-3", "3-1", "1-5"})
 mine2 = comcigan.my_periods(data, "정유경", {"1-5"})
 eq([(c["period"], c["room"]) for c in mine2[1]], [(2, "1-4")], "1-5반을 빼면 1-4만")
 
+# --- 정미지(수학 1-1)와 정미자(과학 1-5): 컴시간에는 둘 다 「정미」. 내 과목을 고르면 갈린다
+twin = {"월요일": comcigan._monday(0), "classes": {
+    "1-1": {1: [cell(2, "수학", "정미")], 3: [cell(4, "수학", "정미")]},
+    "1-5": {1: [cell(2, "과학", "정미")], 2: [cell(3, "과학", "정미", True)]},
+}}
+allm = comcigan.my_periods(twin, "정미지")
+eq(comcigan.subject_counts(allm), [("과학", 2), ("수학", 2)], "과목이 둘 나오면 이름이 겹친 것")
+only = comcigan.my_periods(twin, "정미지", subjects={"수학"})
+eq([(d, c["period"], c["room"]) for d in only for c in only[d]], [(1, 2, "1-1"), (3, 4, "1-1")], "수학만")
+eq(comcigan.subject_counts(comcigan.my_periods(data, "정유경")), [("수학", 3)], "한 과목이면 가를 일 없음")
+# 같은 과목 동명이인(둘 다 수학): 같은 시간에 두 반이 보이면 겹친 것 → 내 반만 남기면 갈린다
+same = {"월요일": comcigan._monday(0), "classes": {
+    "1-1": {1: [cell(2, "수학", "정미")], 3: [cell(4, "수학", "정미")]},
+    "1-2": {1: [cell(3, "수학", "정미")]},
+    "1-5": {1: [cell(2, "수학", "정미")], 2: [cell(3, "수학", "정미")]},   # 월2는 1-1과 겹침
+}}
+m = comcigan.my_periods(same, "정미지")
+eq(comcigan.conflicts(m), [(1, 2, ["1-1", "1-5"])], "같은 시간 두 반 = 다른 사람")
+eq(comcigan.sorted_rooms(m), ["1-1", "1-2", "1-5"])
+mine_only = comcigan.my_periods(same, "정미지", exclude={"1-5"})
+eq(comcigan.conflicts(mine_only), [], "남의 반(1-5)을 빼면 겹침이 없다")
+eq(comcigan.sorted_rooms(mine_only), ["1-1", "1-2"])
+eq(comcigan.conflicts(comcigan.my_periods(data, "정유경")), [], "겹침 없는 보통 시간표")
+store.update(teacher="정미지", my_subjects=["과학"], cache=twin, manual={})
+sci = comcigan.lessons_on(date.fromisoformat(twin["월요일"]))
+eq(sci, {2: {"room": "1-5", "subject": "과학", "replaced": False}}, "정미자 쪽(과학)을 고르면 1-5만")
+store.update(my_subjects=[], teacher="정유경", cache=data)
+
 # --- 오늘 수업: 이번 주 캐시가 있으면 그것, 없으면 직접 입력
 store.update(teacher="정유경", cache=data, manual={"0-1": "9-9 가짜"})
 mon = date.fromisoformat(data["월요일"])

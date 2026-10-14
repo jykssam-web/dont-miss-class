@@ -130,19 +130,21 @@ def parse_rooms(text):
     return {m.replace(" ", "") for m in re.findall(r"\d+\s*-\s*\d+", text or "")}
 
 
-def my_periods(data, teacher, exclude=()):
+def my_periods(data, teacher, exclude=(), subjects=()):
     """전 반을 훑어 내 수업만. {요일(1=월): [{period, subject, room, replaced}]}
 
     컴시간이 준 이름이 내 이름의 앞부분일 때만 나로 본다(한쪽 방향만).
         내 이름 정유경 · 컴시간 「정유」   → 나
         내 이름 정유경 · 컴시간 「정유리」 → 남
-    같은 두 글자를 쓰는 다른 선생님 반은 exclude 로 뺀다.
+    같은 두 글자를 쓰는 다른 선생님이 있으면 두 가지로 가른다.
+        subjects  내가 가르치는 과목만(정미지=수학, 정미자=과학이면 수학만 고르면 된다)
+        exclude   과목까지 같을 때, 남의 반을 직접 뺀다
     """
     teacher = (teacher or "").strip()
     out = {d: [] for d in range(1, 6)}
     if not teacher or not data:
         return out
-    exclude = set(exclude or ())
+    exclude, subjects = set(exclude or ()), set(subjects or ())
     for room, days in (data.get("classes") or {}).items():
         if room in exclude:
             continue
@@ -151,6 +153,8 @@ def my_periods(data, teacher, exclude=()):
                 name = (c.get("teacher") or "").strip()
                 if len(name) < 2 or not teacher.startswith(name):
                     continue
+                if subjects and (c.get("subject") or "") not in subjects:
+                    continue
                 out[int(day)].append({"period": c.get("period", 0),
                                       "subject": c.get("subject", ""),
                                       "room": room,
@@ -158,6 +162,43 @@ def my_periods(data, teacher, exclude=()):
     for day in out:
         out[day].sort(key=lambda x: x["period"])
     return out
+
+
+def conflicts(mine):
+    """같은 시간에 두 반 이상에 들어가는 칸. [(요일, 교시, [반, …])].
+    한 사람이 동시에 두 반에 들어갈 수는 없으니(합반 수업은 예외), 이런 칸이 보이면
+    이름이 같은 다른 선생님이 섞였다는 뜻이다."""
+    out = []
+    for day in sorted(mine):
+        at = {}
+        for c in mine[day]:
+            at.setdefault(c["period"], set()).add(c["room"])
+        for p in sorted(at):
+            if len(at[p]) > 1:
+                out.append((day, p, sorted(at[p], key=_room_key)))
+    return out
+
+
+def _room_key(room):
+    try:
+        g, c = room.split("-")
+        return int(g), int(c)
+    except ValueError:
+        return 99, 0
+
+
+def sorted_rooms(mine):
+    """my_periods 결과에 나오는 반을 학년·반 순으로."""
+    return sorted({c["room"] for cells in mine.values() for c in cells}, key=_room_key)
+
+
+def subject_counts(mine):
+    """my_periods 결과에서 과목별 주당 시간. [(과목, 시간)] 많은 순. 이름이 겹치는지 가릴 때 쓴다."""
+    n = {}
+    for cells in mine.values():
+        for c in cells:
+            n[c["subject"]] = n.get(c["subject"], 0) + 1
+    return sorted(n.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
 def matched_names(data, teacher):
@@ -236,7 +277,8 @@ def lessons_on(day=None):
     out = {}
     data = cfg.get("cache")
     if data and data.get("월요일") == _monday(0):
-        for c in my_periods(data, cfg["teacher"], parse_rooms(cfg.get("exclude_rooms"))).get(wd + 1, []):
+        for c in my_periods(data, cfg["teacher"], parse_rooms(cfg.get("exclude_rooms")),
+                             cfg.get("my_subjects") or ()).get(wd + 1, []):
             p = int(c.get("period") or 0)
             if p:
                 out[p] = {"room": c["room"], "subject": c["subject"], "replaced": c["replaced"]}
