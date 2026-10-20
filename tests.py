@@ -17,9 +17,9 @@ def eq(a, b, msg=""):
     assert a == b, "%s\n  기대 %r\n  실제 %r" % (msg, b, a)
 
 
-# --- 1교시 시작 후보: 8:20 ~ 9:00, 5분 단위 9개
+# --- 1교시 시작 후보: 8:20 ~ 9:30, 5분 단위 15개
 c = schedule.first_start_choices()
-eq(c[0], "08:20"); eq(c[-1], "09:00"); eq(len(c), 9)
+eq(c[0], "08:20"); eq(c[-1], "09:30"); eq(len(c), 15)
 
 # --- 채우기: 8:50 시작, 45분 수업, 쉬는 시간 10분
 t = schedule.fill("08:50", 45, 7)
@@ -182,5 +182,30 @@ eq(comcigan.lessons_on(date.fromordinal(mon.toordinal() + 5)), {}, "토요일은
 store.update(cache={"월요일": "2000-01-03", "classes": data["classes"]})
 got = comcigan.lessons_on(mon)
 eq(got, {1: {"room": "9-9", "subject": "가짜", "replaced": False}}, "지난주 캐시는 안 쓰고 직접 입력으로")
+
+# --- 자동 업데이트: 버전 비교와 릴리스 해석
+import updater
+import version
+eq(updater.parse_version("v1.0.2"), (1, 0, 2))
+eq(updater.parse_version("1.0"), None)
+eq(updater.is_newer("v1.0.10", "1.0.9"), True, "10 > 9 (숫자로 비교)")
+eq(updater.is_newer("1.0.2", "1.0.2"), False)
+eq(updater.is_newer("0.9.9", "1.0.0"), False)
+ok_url = "https://github.com/%s/releases/download/v9.9.9/DontMissClass_Setup_9.9.9.exe" % version.GITHUB_REPO
+rel = {"tag_name": "v9.9.9", "body": "고침 SHA256: " + "ab" * 32,
+       "assets": [{"name": "DontMissClass_Setup_9.9.9.exe", "browser_download_url": ok_url}]}
+eq(updater.find_release(rel), {"version": "9.9.9", "url": ok_url, "sha256": "ab" * 32,
+                               "name": "DontMissClass_Setup_9.9.9.exe"})
+eq(updater.find_release(dict(rel, draft=True)), None, "초안은 무시")
+eq(updater.find_release(dict(rel, prerelease=True)), None, "시험판은 무시")
+eq(updater.find_release(dict(rel, tag_name="v0.0.1")), None, "옛 버전은 무시")
+evil = dict(rel, assets=[{"name": "DontMissClass_Setup_9.9.9.exe", "browser_download_url": "https://evil.example/x.exe"}])
+eq(updater.find_release(evil), None, "깃허브 밖 주소는 거부")
+eq(updater.find_release(dict(rel, body="해시 없음"))["sha256"], "", "해시가 없으면 빈 값(내려받기에서 거부)")
+try:
+    updater.download({"sha256": "", "url": ok_url, "name": "x.exe"})
+    raise AssertionError("해시 없이 내려받으면 안 됨")
+except updater.UpdateError:
+    pass
 
 print("검사 통과")

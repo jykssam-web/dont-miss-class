@@ -1,6 +1,9 @@
 ﻿; 놓치지마수업 설치 스크립트 (Inno Setup 6). 빌드: ISCC.exe installer.iss
 #define AppName "놓치지마수업"
-#define AppVer "1.0.0"
+; 버전은 version.py 가 정한다. build.py 가 /DAppVer=… 로 넘긴다.
+#ifndef AppVer
+  #define AppVer "1.0.2"
+#endif
 #define ExeName "DontMissClass.exe"
 
 [Setup]
@@ -43,6 +46,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 
 [Run]
 Filename: "{app}\{#ExeName}"; Description: "지금 바로 시작해서 설정하기"; Flags: nowait postinstall skipifsilent
+; 자동 업데이트(조용한 설치)가 끝나면 트레이로 다시 켠다
+Filename: "{app}\{#ExeName}"; Parameters: "--background"; Flags: nowait; Check: WizardSilent
 
 [Code]
 procedure KillRunning();

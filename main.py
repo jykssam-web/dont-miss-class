@@ -19,9 +19,13 @@ import autostart
 import comcigan
 import schedule
 import store
+import updater
+import version
 
 LATE_GRACE_MIN = 3          # 절전에서 깨어 늦게 확인해도 이 안이면 알린다
 REFRESH_CHECK_SEC = 300     # 시간표를 새로 받을 때가 됐는지 보는 간격
+UPDATE_CHECK_HOURS = 6      # 새 버전이 있는지 보는 간격
+UPDATE_QUIET_MIN = 10       # 수업 시작 앞뒤 이 시간 안에는 설치(재시작)하지 않는다
 
 
 def _single_instance():
@@ -57,10 +61,14 @@ class App:
         self.cfg = store.load()
         self.last_error = ""
         self.icon = None
+        self.pending_update = None            # 내려받아 검증까지 마친 설치 파일 경로
+        self._update_busy = False
         self._start_tray()
         self.root.after(300, self._drain)
         self.root.after(1000, self._tick)
         self.root.after(2000, self._refresh_loop)
+        self.root.after(60 * 1000, self._update_loop)
+        self.root.after(90 * 1000, self._install_when_quiet)
 
         if not self.cfg["configured"]:
             self.open_settings(first_run=True)
@@ -109,6 +117,74 @@ class App:
         except Exception as e:
             self.last_error = str(e)
             store.log("시간표 갱신 실패: %s" % e)
+
+    # ------------------------------------------------------------ 자동 업데이트
+    def _update_loop(self):
+        self.check_update()
+        self.root.after(UPDATE_CHECK_HOURS * 3600 * 1000, self._update_loop)
+
+    def check_update(self):
+        if not updater.can_self_update() or self._update_busy or self.pending_update:
+            return
+        self._update_busy = True
+        threading.Thread(target=self._update_once, daemon=True).start()
+
+    def _update_once(self):
+        try:
+            info = updater.check()
+            if info:
+                store.log("새 버전 %s 발견 (현재 %s)" % (info["version"], version.__version__))
+                self.pending_update = updater.download(info)
+        except Exception as e:
+            store.log("업데이트 실패: %s" % e)
+        finally:
+            self._update_busy = False
+
+    def _quiet_now(self):
+        """수업 알림이 막 울렸거나 곧 울릴 때는 재시작하지 않는다."""
+        now = dt.datetime.now()
+        nm = now.hour * 60 + now.minute
+        for t in self.cfg["times"]:
+            s = schedule.to_min(t)
+            if s is not None and -UPDATE_QUIET_MIN <= nm - s <= UPDATE_QUIET_MIN:
+                return False
+        return not any(w.winfo_exists() for w in self.root.winfo_children()
+                       if isinstance(w, tk.Toplevel) and w is not self.wizard)
+
+    def _install_when_quiet(self):
+        try:
+            if self.pending_update and self._quiet_now() and not (self.wizard and self.wizard.winfo_exists()):
+                path, self.pending_update = self.pending_update, None
+                updater.install(path)
+        except Exception as e:
+            store.log("업데이트 설치 실패: %r" % e)
+        self.root.after(60 * 1000, self._install_when_quiet)
+
+    def update_now(self):
+        """트레이의 「업데이트 확인」. 결과를 말풍선으로 알려 준다."""
+        if not updater.can_self_update():
+            self._balloon("설치판에서만 업데이트할 수 있어요.")
+            return
+        self._balloon("새 버전이 있는지 확인하고 있어요…")
+        def work():
+            try:
+                info = updater.check()
+                if not info:
+                    self._balloon("최신 버전(%s)을 쓰고 계세요." % version.__version__)
+                    return
+                self.pending_update = updater.download(info)
+                self._balloon("새 버전 %s을(를) 받았어요. 수업이 없는 때에 자동으로 설치돼요." % info["version"])
+            except Exception as e:
+                store.log("업데이트 실패: %s" % e)
+                self._balloon("업데이트하지 못했어요. 잠시 뒤 다시 시도해 주세요.")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _balloon(self, text):
+        try:
+            if self.icon is not None:
+                self.icon.notify(text, "놓치지마수업")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------ 화면 조작
     def open_settings(self, first_run=None):
@@ -185,6 +261,7 @@ class App:
                                  checked=lambda item: self.cfg["enabled"]),
                 pystray.MenuItem("테스트 알림", lambda: self.q.put(self.test_alert)),
                 pystray.MenuItem("시간표 지금 새로 받기", lambda: self.q.put(self.refresh_now)),
+                pystray.MenuItem("업데이트 확인 (v%s)" % version.__version__, lambda: self.q.put(self.update_now)),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("종료", lambda: self.q.put(self.quit)),
             )

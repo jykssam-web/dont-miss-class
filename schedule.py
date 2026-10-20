@@ -10,8 +10,8 @@ LESSON_CHOICES = (40, 45, 50)
 
 
 def first_start_choices():
-    """1교시 시작 시각 후보. 8:20부터 9:00까지 5분 단위."""
-    return ["%02d:%02d" % (m // 60, m % 60) for m in range(8 * 60 + 20, 9 * 60 + 1, 5)]
+    """1교시 시작 시각 후보. 8:20부터 9:30까지 5분 단위."""
+    return ["%02d:%02d" % (m // 60, m % 60) for m in range(8 * 60 + 20, 9 * 60 + 31, 5)]
 
 
 def to_min(t):

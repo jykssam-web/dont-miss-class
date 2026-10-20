@@ -34,10 +34,20 @@ class Wizard(tk.Toplevel):
         self.first_run = first_run
         self.title("놓치지마수업")
         self.configure(bg="white")
-        self.resizable(False, False)
-        w, h = 660, 700
+        # 화면 배율(125%·150%)이 크면 글씨만 커지고 창은 그대로라 칸이 잘렸다. 배율만큼 창도 키우고,
+        # 작은 화면에서는 화면 안에 들어오게 줄이며, 사용자가 직접 늘일 수도 있게 한다.
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        self.geometry("%dx%d+%d+%d" % (w, h, (sw - w) // 2, max(10, (sh - h) // 2 - 20)))
+        try:
+            self.scale = max(1.0, min(2.5, self.winfo_fpixels("1i") / 96.0))
+        except Exception:
+            self.scale = 1.0
+        self.wrap = int(580 * self.scale)
+        w = min(int(700 * self.scale), sw - 40)
+        h = min(int(800 * self.scale), sh - 90)
+        self.resizable(True, True)
+        self.minsize(min(w, int(640 * self.scale)), min(h, int(640 * self.scale)))
+        self.geometry("%dx%d+%d+%d" % (w, h, max(0, (sw - w) // 2), max(10, (sh - h) // 2 - 20)))
+        self.bind("<Configure>", self._on_resize)
         try:
             from PIL import ImageTk
             import icon
@@ -131,10 +141,21 @@ class Wizard(tk.Toplevel):
         for c in self.body.winfo_children():
             c.destroy()
 
-    def _label(self, text, color=None, size=11, bold=False, pady=(0, 6), wrap=580, **kw):
+    def _on_resize(self, e):
+        """창을 늘이거나 줄이면 안내 글의 줄바꿈 폭도 따라간다."""
+        if e.widget is self:
+            self.wrap = max(300, e.width - int(80 * self.scale))
+            for lb in getattr(self, "_wrapped", []):
+                try:
+                    lb.config(wraplength=self.wrap)
+                except tk.TclError:
+                    pass
+
+    def _label(self, text, color=None, size=11, bold=False, pady=(0, 6), wrap=None, **kw):
         lb = tk.Label(self.body, text=text, bg="white", fg=color or TEXT, justify="left",
-                      anchor="w", wraplength=wrap, font=(FONT, size, "bold" if bold else "normal"), **kw)
+                      anchor="w", wraplength=wrap or self.wrap, font=(FONT, size, "bold" if bold else "normal"), **kw)
         lb.pack(fill="x", pady=pady)
+        self._wrapped = [w for w in getattr(self, "_wrapped", []) if w.winfo_exists()] + ([lb] if not wrap else [])
         return lb
 
     def _show(self, n):
@@ -373,7 +394,7 @@ class Wizard(tk.Toplevel):
                 self.data, {"teacher": self.teacher, "my_sample": self.my_sample, "my_tid": self.my_tid})
             tk.Label(self.subj_frame, text="「%s」 이름의 선생님이 %d분 계세요. 선생님이 수업하시는 건 어느 것인가요?" % (
                 people[0]["name"], len(people)), bg="white", fg=TEXT, font=(FONT, 11, "bold"),
-                     wraplength=580, justify="left").pack(anchor="w")
+                     wraplength=self.wrap, justify="left").pack(anchor="w")
             row = ttk.Frame(self.subj_frame)
             row.pack(fill="x", pady=(4, 6))
             self.var_person = tk.IntVar(value=-1 if self.my_tid is None else self.my_tid)
@@ -552,16 +573,16 @@ class Wizard(tk.Toplevel):
         # 한 줄에 두 교시씩(1·2 / 3·4 / 5·6 / 7·8 …). 교시가 늘면 줄이 아래로 늘어난다.
         for i, t in enumerate(self.times):
             r, base = i // 2, (0 if i % 2 == 0 else 3)
-            tk.Label(self.rows, text="%d교시" % (i + 1), bg=ui.SURFACE, fg=TEXT, font=(FONT, 12),
-                     width=5, anchor="w").grid(row=r, column=base, padx=(22, 6), pady=4, sticky="w")
+            tk.Label(self.rows, text="%d교시" % (i + 1), bg=ui.SURFACE, fg=TEXT, font=(FONT, 13),
+                     width=5, anchor="w").grid(row=r, column=base, padx=(22, 6), pady=6, sticky="w")
             var = tk.StringVar(value=t)
             self.row_vars.append(var)
             if i == 0:
-                tk.Label(self.rows, text=t, bg=ui.SURFACE, fg=TEXT, font=(FONT, 12, "bold"),
-                         width=7, anchor="w").grid(row=r, column=base + 1, padx=(8, 0), sticky="w")
+                tk.Label(self.rows, text=t, bg=ui.SURFACE, fg=TEXT, font=(FONT, 14, "bold"),
+                         width=8, anchor="w").grid(row=r, column=base + 1, padx=(8, 0), sticky="w")
             else:
-                e = ttk.Entry(self.rows, textvariable=var, width=7, font=(FONT, 12))
-                e.grid(row=r, column=base + 1, sticky="w")
+                e = ttk.Entry(self.rows, textvariable=var, width=8, font=(FONT, 14))
+                e.grid(row=r, column=base + 1, sticky="w", ipady=4)
                 e.bind("<Return>", lambda ev, k=i: self._commit(k, refocus=True))
                 e.bind("<FocusOut>", lambda ev, k=i: self._commit(k))
                 e.bind("<KeyRelease>", lambda ev, k=i: self._typing(k))
