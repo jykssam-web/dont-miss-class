@@ -9,6 +9,7 @@ import tkinter.font as tkfont
 import fonts
 import sounds
 import store
+import version
 
 BG = "#0f2a4a"
 FG = "#ffffff"
@@ -65,7 +66,7 @@ def _show_round(root, period, time_text, lesson, sound_path, family):
 def _show_tk(root, period, time_text, lesson, sound_path, family):
     FONT = family
     win = tk.Toplevel(root)
-    win.title("놓치지마수업")
+    win.title(version.DISPLAY_NAME)
     win.configure(bg=BG)
     win.attributes("-topmost", True)
     win.resizable(False, False)

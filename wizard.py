@@ -18,6 +18,7 @@ import sounds
 import store
 
 import ui
+import version
 
 FONT = ui.family()
 ACCENT, MUTED, ERR, OK, TEXT = ui.ACCENT, ui.MUTED, ui.ERR, ui.OK, ui.TEXT
@@ -32,7 +33,7 @@ class Wizard(tk.Toplevel):
         self.on_test_alert = on_test_alert
         self.on_cancel = on_cancel
         self.first_run = first_run
-        self.title("놓치지마수업")
+        self.title(version.DISPLAY_NAME)
         self.configure(bg="white")
         # 화면 배율(125%·150%)이 크면 글씨만 커지고 창은 그대로라 칸이 잘렸다. 배율만큼 창도 키우고,
         # 작은 화면에서는 화면 안에 들어오게 줄이며, 사용자가 직접 늘일 수도 있게 한다.
@@ -90,7 +91,7 @@ class Wizard(tk.Toplevel):
         head.pack(fill="x", padx=30, pady=(24, 4))
         top = tk.Frame(head, bg=ui.BG)
         top.pack(fill="x")
-        tk.Label(top, text="놓치지마수업 · " + ("처음 설정" if first_run else "설정"), bg=ui.BG, fg=MUTED,
+        tk.Label(top, text=version.DISPLAY_NAME + " · " + ("처음 설정" if first_run else "설정"), bg=ui.BG, fg=MUTED,
                  font=(FONT, 10)).pack(side="left")
         self.lbl_count = tk.Label(top, bg=ui.BG, fg=MUTED, font=(FONT, 10))
         self.lbl_count.pack(side="right")

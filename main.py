@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""놓치지마수업 — 내 수업이 시작하는 때 크게 알려 주는 작은 프로그램.
+"""티타임 · 놓치지마수업 — 내 수업이 시작하는 때 크게 알려 주는 작은 프로그램.
 
 실행
     main.py              처음이면 설정 마법사, 아니면 설정 창을 연다
@@ -21,6 +21,7 @@ import schedule
 import store
 import updater
 import version
+from version import DISPLAY_NAME
 
 LATE_GRACE_MIN = 3          # 절전에서 깨어 늦게 확인해도 이 안이면 알린다
 REFRESH_CHECK_SEC = 300     # 시간표를 새로 받을 때가 됐는지 보는 간격
@@ -182,7 +183,7 @@ class App:
     def _balloon(self, text):
         try:
             if self.icon is not None:
-                self.icon.notify(text, "놓치지마수업")
+                self.icon.notify(text, DISPLAY_NAME)
         except Exception:
             pass
 
@@ -203,7 +204,7 @@ class App:
         self.fired = set()
         threading.Thread(target=self._refresh_once, kwargs={"force": True}, daemon=True).start()
         self._update_tray()
-        messagebox.showinfo("놓치지마수업", "설정을 마쳤어요.\n수업이 시작될 때 알려 드릴게요.\n"
+        messagebox.showinfo(DISPLAY_NAME, "설정을 마쳤어요.\n수업이 시작될 때 알려 드릴게요.\n"
                             "프로그램은 화면 오른쪽 아래 종 모양 아이콘으로 계속 켜져 있습니다.")
 
     def _settings_closed(self):
@@ -214,7 +215,7 @@ class App:
         if not self.cfg["configured"] and self.icon is not None:
             try:
                 self.icon.notify("아직 설정이 끝나지 않았어요. 이 아이콘을 눌러 설정을 마치면 알림이 시작돼요.",
-                                 "놓치지마수업")
+                                 DISPLAY_NAME)
             except Exception:
                 pass
 
@@ -265,7 +266,7 @@ class App:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("종료", lambda: self.q.put(self.quit)),
             )
-            self.icon = pystray.Icon("DontMissClass", icon.make_image(64), "놓치지마수업", menu)
+            self.icon = pystray.Icon("DontMissClass", icon.make_image(64), DISPLAY_NAME, menu)
             self.icon.run_detached()
         except Exception as e:
             store.log("트레이 시작 실패: %r" % e)
@@ -305,7 +306,7 @@ def main():
         if "--background" not in args:
             root = tk.Tk()
             root.withdraw()
-            messagebox.showinfo("놓치지마수업", "이미 실행 중입니다.\n화면 오른쪽 아래 종 모양 아이콘을 눌러 설정을 여세요.")
+            messagebox.showinfo(DISPLAY_NAME, "이미 실행 중입니다.\n화면 오른쪽 아래 종 모양 아이콘을 눌러 설정을 여세요.")
         return
     App(background="--background" in args, demo="--demo" in args).run()
 

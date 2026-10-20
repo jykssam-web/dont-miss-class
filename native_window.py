@@ -8,6 +8,8 @@ Tk 의 창은 모서리를 투명하게 못 만들어서 윈도우 기능(layere
 import ctypes
 import ctypes.wintypes as wt
 
+import version
+
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
 kernel32 = ctypes.windll.kernel32
@@ -139,7 +141,7 @@ def show(img, x, y, on_close=None):
     """RGBA 그림을 화면 (x, y) 에 창으로 띄운다. 창 핸들을 돌려준다. 못 만들면 예외."""
     _register()
     w, h = img.size
-    hwnd = user32.CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, CLASS_NAME, "놓치지마수업",
+    hwnd = user32.CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, CLASS_NAME, version.DISPLAY_NAME,
                                   WS_POPUP, x, y, w, h, None, None, kernel32.GetModuleHandleW(None), None)
     if not hwnd:
         raise OSError("창을 만들지 못했습니다.")
